@@ -1,0 +1,57 @@
+[da]
+# ============================================================================
+# IMPORTANT: Configure these values for your deployment.
+# Alternatively, set the corresponding environment variables instead.
+# ============================================================================
+
+# The address of the Celestia RPC server to interact with.
+rpc_url = "ws://127.0.0.1:26658"
+
+# JWT token for RPC server.
+rpc_auth_token = "%%RPC_AUTH_TOKEN%%"
+
+# gRPC URL for the Celestia consensus node.
+grpc_url = "%%GRPC_URL%%"
+
+# Private key used to sign Celestia transactions.
+signer_private_key = "%%SIGNER_PRIVATE_KEY%%"
+
+[storage]
+# The path to the rollup's data directory.
+path = "data"
+
+# NOMT settings
+pruner_versions_to_keep = 50
+user_commit_concurrency = 8
+kernel_commit_concurrency = 4
+user_hashtable_buckets = 16000000
+user_page_cache_size = 4096
+kernel_page_cache_size = 1024
+
+[runner]
+da_polling_interval_ms = 50
+concurrent_sync_tasks = 20
+pre_fetched_blocks_capacity = 100
+save_tx_bodies = true
+
+[runner.http_config]
+bind_host = "127.0.0.1"
+bind_port = 8899
+
+[monitoring]
+telegraf_address = "127.0.0.1:8094"
+
+[proof_manager]
+aggregated_proof_block_jump = 1
+prover_address = "HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+max_number_of_transitions_in_db = 100
+max_number_of_transitions_in_memory = 30
+
+[sequencer]
+rollup_address = "HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+max_allowed_node_distance_behind = 5
+max_concurrent_blobs = 128
+max_batch_size_bytes = 1048576
+blob_processing_timeout_secs = 120
+
+[sequencer.standard]

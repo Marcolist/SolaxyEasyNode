@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solaxy Node Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:'SF Mono','Cascadia Code','Fira Code',monospace;font-size:13px;padding:16px}
+a{color:#58a6ff;text-decoration:none}
+h1{font-size:20px;color:#f0f6fc;margin-bottom:4px}
+h2{font-size:15px;color:#8b949e;font-weight:normal;margin-bottom:16px}
+h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px;margin-bottom:16px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:14px}
+.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.badge-ok{background:#238636;color:#fff}
+.badge-err{background:#da3633;color:#fff}
+.badge-warn{background:#9e6a03;color:#fff}
+
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 16px}
+.stat{display:flex;flex-direction:column}
+.stat-label{color:#8b949e;font-size:11px;text-transform:uppercase}
+.stat-value{color:#f0f6fc;font-size:15px;font-weight:600}
+.stat-value.mono{font-size:13px}
+
+.progress-bar{background:#21262d;border-radius:4px;height:18px;overflow:hidden;margin:8px 0}
+.progress-fill{height:100%;background:linear-gradient(90deg,#238636,#2ea043);border-radius:4px;transition:width 0.5s;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#fff;min-width:40px}
+
+.tabs{display:flex;gap:0;margin-bottom:0;border-bottom:1px solid #30363d}
+.tab{padding:8px 16px;cursor:pointer;color:#8b949e;border-bottom:2px solid transparent;transition:all 0.2s}
+.tab:hover{color:#c9d1d9}
+.tab.active{color:#f0f6fc;border-bottom-color:#58a6ff}
+
+.log-container{background:#0d1117;border:1px solid #30363d;border-top:none;border-radius:0 0 8px 8px;height:400px;overflow-y:auto;padding:8px 12px;font-size:12px;line-height:1.6}
+.log-line{white-space:pre-wrap;word-break:break-all}
+.log-line.error{color:#f85149}
+.log-line.warn{color:#d29922}
+.log-line.info{color:#8b949e}
+.log-line.debug{color:#484f58}
+
+.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:8px}
+.header-right{text-align:right;color:#8b949e;font-size:12px}
+
+.sys-bar{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;padding:10px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px;font-size:12px;color:#8b949e}
+.sys-bar span{color:#c9d1d9}
+
+.peer-id{font-size:10px;color:#484f58;word-break:break-all}
+
+.info-toggle{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px 16px;margin-bottom:16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none}
+.info-toggle:hover{border-color:#58a6ff}
+.info-toggle h3{margin:0;font-size:14px;color:#f0f6fc;display:flex;align-items:center;gap:8px}
+.info-toggle .arrow{color:#8b949e;transition:transform 0.2s;font-size:12px}
+.info-toggle.open .arrow{transform:rotate(90deg)}
+.info-panel{display:none;background:#161b22;border:1px solid #30363d;border-top:none;border-radius:0 0 8px 8px;margin-top:-17px;margin-bottom:16px;padding:16px;font-size:12px;line-height:1.7}
+.info-panel.open{display:block}
+.info-panel h4{color:#f0f6fc;font-size:13px;margin:14px 0 6px 0}
+.info-panel h4:first-child{margin-top:0}
+.info-panel .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px}
+.info-panel .info-row{display:flex;justify-content:space-between;padding:2px 0}
+.info-panel .info-key{color:#8b949e}
+.info-panel .info-val{color:#c9d1d9;font-weight:600}
+.info-panel .info-val.green{color:#3fb950}
+.info-panel .info-val.yellow{color:#d29922}
+.info-panel .info-val.red{color:#f85149}
+.info-panel .info-val.blue{color:#58a6ff}
+.info-panel .info-note{color:#8b949e;font-style:italic;margin-top:8px;padding:8px 12px;background:#0d1117;border-radius:4px;border-left:3px solid #58a6ff}
+.info-panel .role-card{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px 12px;margin:6px 0}
+.info-panel .role-card .role-title{color:#58a6ff;font-weight:600;font-size:12px;margin-bottom:4px}
+.info-panel .role-card .role-status{font-size:11px}
+
+/* Settings Panel */
+.settings-toggle{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px 16px;margin-bottom:16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none}
+.settings-toggle:hover{border-color:#58a6ff}
+.settings-toggle h3{margin:0;font-size:14px;color:#f0f6fc;display:flex;align-items:center;gap:8px}
+.settings-toggle .arrow{color:#8b949e;transition:transform 0.2s;font-size:12px}
+.settings-toggle.open .arrow{transform:rotate(90deg)}
+.settings-panel{display:none;background:#161b22;border:1px solid #30363d;border-top:none;border-radius:0 0 8px 8px;margin-top:-17px;margin-bottom:16px;padding:16px}
+.settings-panel.open{display:block}
+.settings-panel h4{color:#f0f6fc;font-size:13px;margin:16px 0 8px 0;padding-bottom:4px;border-bottom:1px solid #21262d}
+.settings-panel h4:first-child{margin-top:0}
+.cfg-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px}
+.cfg-field{display:flex;flex-direction:column;gap:2px}
+.cfg-field label{color:#8b949e;font-size:11px;text-transform:uppercase}
+.cfg-field input[type="text"],.cfg-field input[type="number"],.cfg-field input[type="password"]{background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:6px 8px;font-family:inherit;font-size:12px;width:100%}
+.cfg-field input:focus{border-color:#58a6ff;outline:none}
+.cfg-toggle{display:flex;align-items:center;gap:8px;padding:6px 0}
+.cfg-toggle input[type="checkbox"]{accent-color:#238636;width:16px;height:16px}
+.cfg-toggle label{color:#c9d1d9;font-size:12px}
+.cfg-actions{display:flex;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid #30363d}
+.btn{padding:6px 16px;border-radius:6px;border:1px solid #30363d;font-family:inherit;font-size:12px;cursor:pointer;font-weight:600;transition:all 0.15s}
+.btn-primary{background:#238636;color:#fff;border-color:#238636}
+.btn-primary:hover{background:#2ea043}
+.btn-secondary{background:#21262d;color:#c9d1d9}
+.btn-secondary:hover{background:#30363d}
+.btn-danger{background:#da3633;color:#fff;border-color:#da3633}
+.btn-danger:hover{background:#f85149}
+.btn-sm{padding:3px 10px;font-size:11px}
+.svc-controls{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
+.svc-row{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#0d1117;border:1px solid #30363d;border-radius:6px}
+.svc-row .svc-name{color:#c9d1d9;font-weight:600;font-size:12px}
+.svc-row .svc-badge{font-size:10px;padding:2px 6px;border-radius:8px;font-weight:600}
+.svc-row .svc-btns{display:flex;gap:4px}
+.cfg-saved{color:#3fb950;font-size:12px;display:none;align-items:center;gap:4px}
+.cfg-error{color:#f85149;font-size:12px;display:none;align-items:center;gap:4px}
+
+@media(max-width:768px){
+  .grid{grid-template-columns:1fr}
+  .stat-grid{grid-template-columns:1fr}
+  .log-container{height:300px}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>Solaxy Node Dashboard</h1>
+    <h2>ML1985DE-NODE</h2>
+  </div>
+  <div class="header-right">
+    <div>LAN: <span style="color:#58a6ff" id="lanIp">192.168.179.153</span></div>
+    <div id="lastUpdate">-</div>
+  </div>
+</div>
+
+<div class="grid">
+  <!-- Solaxy Card -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Solaxy SVM Rollup</h3>
+      <span class="badge" id="solaxyBadge">-</span>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><span class="stat-label">Slot</span><span class="stat-value" id="solSlot">-</span></div>
+      <div class="stat"><span class="stat-label">Block Time</span><span class="stat-value" id="solBlockTime">-</span></div>
+      <div class="stat"><span class="stat-label">Memory</span><span class="stat-value" id="solMem">-</span></div>
+      <div class="stat"><span class="stat-label">CPU</span><span class="stat-value" id="solCpu">-</span></div>
+    </div>
+    <div style="margin-top:10px">
+      <div class="stat-label">Sync Progress (DA Height)</div>
+      <div class="progress-bar"><div class="progress-fill" id="solSyncBar" style="width:0%">0%</div></div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#8b949e">
+        <span id="solSyncFrom">-</span>
+        <span id="solSyncTo">-</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Celestia Card -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Celestia Light Node</h3>
+      <span class="badge" id="celestiaBadge">-</span>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><span class="stat-label">Head Height</span><span class="stat-value" id="celHead">-</span></div>
+      <div class="stat"><span class="stat-label">DAS Sampled</span><span class="stat-value" id="celDas">-</span></div>
+      <div class="stat"><span class="stat-label">Balance</span><span class="stat-value" id="celBalance">-</span></div>
+      <div class="stat"><span class="stat-label">Memory</span><span class="stat-value" id="celMem">-</span></div>
+    </div>
+    <div style="margin-top:10px">
+      <div class="stat-label">DAS Catch-up</div>
+      <div class="progress-bar"><div class="progress-fill" id="celDasBar" style="width:0%">0%</div></div>
+    </div>
+    <div class="peer-id" id="celPeerId" style="margin-top:6px"></div>
+  </div>
+
+  <!-- Solaxy L2 Network Card -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Solaxy L2 Network</h3>
+      <span class="badge" id="rpcBadge">-</span>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><span class="stat-label">Sovereign Slot (Local)</span><span class="stat-value" style="color:#3fb950" id="sovSlot">-</span></div>
+      <div class="stat"><span class="stat-label">SVM Slot (Network)</span><span class="stat-value" id="netSlot">-</span></div>
+      <div class="stat"><span class="stat-label">DA Batches (Network)</span><span class="stat-value" style="color:#58a6ff" id="netTxCount">-</span></div>
+      <div class="stat"><span class="stat-label">Network Epoch</span><span class="stat-value" id="netEpoch">-</span></div>
+    </div>
+    <div style="margin-top:8px;font-size:11px;color:#484f58">
+      <div>SVM Slot (genesis export): <span id="localSvmSlot">-</span> (static, only preferred sequencer advances this)</div>
+      <div style="margin-top:2px">via mainnet.rpc.solaxy.io</div>
+    </div>
+  </div>
+
+  <!-- PostgreSQL Card -->
+  <div class="card">
+    <div class="card-header">
+      <h3>PostgreSQL</h3>
+      <span class="badge" id="pgBadge">-</span>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><span class="stat-label">Blocks</span><span class="stat-value" id="pgBlocks">-</span></div>
+      <div class="stat"><span class="stat-label">Transactions</span><span class="stat-value" id="pgTxs">-</span></div>
+      <div class="stat"><span class="stat-label">Accounts</span><span class="stat-value" id="pgAccounts">-</span></div>
+      <div class="stat"><span class="stat-label">DB Size</span><span class="stat-value" id="pgSize">-</span></div>
+    </div>
+  </div>
+
+  <!-- Node Identity Card -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Node Identity</h3>
+    </div>
+    <div style="font-size:12px;line-height:1.8">
+      <div><span class="stat-label">Celestia Peer ID</span><div class="peer-id" style="color:#c9d1d9" id="nodePeerId">-</div></div>
+      <div style="margin-top:6px"><span class="stat-label">Celestia Wallet</span><div style="color:#58a6ff;font-size:11px;word-break:break-all" id="nodeCelWallet">-</div></div>
+      <div style="margin-top:6px"><span class="stat-label">Public IP</span><div style="color:#c9d1d9" id="nodePublicIp">-</div></div>
+      <div style="margin-top:6px"><span class="stat-label">TIA Balance</span><div style="color:#c9d1d9" id="nodeTiaBalance">-</div></div>
+      <div style="margin-top:10px;border-top:1px solid #30363d;padding-top:8px"><span class="stat-label">Solaxy L2 Wallet</span><div style="color:#58a6ff;font-size:11px;word-break:break-all" id="nodeSolxWallet">-</div></div>
+      <div style="margin-top:6px"><span class="stat-label">SOLX Balance</span><div style="color:#c9d1d9" id="nodeSolxBalance">-</div></div>
+    </div>
+  </div>
+
+  <!-- Server Stats Card -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Server Stats</h3>
+      <span style="color:#8b949e;font-size:11px" id="sysUptime">-</span>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><span class="stat-label">CPU Load (1/5/15m)</span><span class="stat-value" id="sysCpuLoad">-</span></div>
+      <div class="stat"><span class="stat-label">CPU Usage</span><span class="stat-value" id="sysCpuPct">-</span></div>
+      <div class="stat"><span class="stat-label">Memory</span><span class="stat-value" id="sysMem">-</span></div>
+      <div class="stat"><span class="stat-label">Memory Used</span><span class="stat-value" id="sysMemPct">-</span></div>
+      <div class="stat"><span class="stat-label">CPU Temp</span><span class="stat-value" id="sysTempCpu">-</span></div>
+      <div class="stat"><span class="stat-label">GPU Temp</span><span class="stat-value" id="sysTempGpu">-</span></div>
+      <div class="stat"><span class="stat-label">Disk</span><span class="stat-value" id="sysDisk">-</span></div>
+      <div class="stat"><span class="stat-label">Disk I/O (R / W)</span><span class="stat-value" id="sysDiskIo">-</span></div>
+      <div class="stat"><span class="stat-label">Network RX</span><span class="stat-value" id="sysNetRx">-</span></div>
+      <div class="stat"><span class="stat-label">Network TX</span><span class="stat-value" id="sysNetTx">-</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Reward Model Info -->
+<div class="info-toggle" id="infoToggle" onclick="toggleInfo()">
+  <h3>Reward Model &amp; Node Roles</h3>
+  <span class="arrow">&#9654;</span>
+</div>
+<div class="info-panel" id="infoPanel">
+
+  <h4>Tokenomics (SOLX)</h4>
+  <div class="info-grid">
+    <div class="info-row"><span class="info-key">Gas Token</span><span class="info-val">SOLX (6 Decimals)</span></div>
+    <div class="info-row"><span class="info-key">Initial Inflation</span><span class="info-val">8%</span></div>
+    <div class="info-row"><span class="info-key">Terminal Inflation</span><span class="info-val">1.5%</span></div>
+    <div class="info-row"><span class="info-key">Taper Rate</span><span class="info-val">15% / year</span></div>
+    <div class="info-row"><span class="info-key">Fee Burn</span><span class="info-val">50%</span></div>
+    <div class="info-row"><span class="info-key">Finality Period</span><span class="info-val">5 Slots</span></div>
+  </div>
+
+  <h4>Network Roles</h4>
+
+  <div class="role-card">
+    <div class="role-title">Attester</div>
+    <div>Attests state transitions on the DA layer. Invalid attestations can be slashed by challengers.</div>
+    <div class="info-grid" style="margin-top:6px">
+      <div class="info-row"><span class="info-key">Min. Bond</span><span class="info-val">1,000 SOLX</span></div>
+      <div class="info-row"><span class="info-key">Status</span><span class="info-val yellow" id="attesterStatus">Not yet active</span></div>
+    </div>
+  </div>
+
+  <div class="role-card">
+    <div class="role-title">Challenger</div>
+    <div>Can challenge invalid attestations and claim the attester's bond as reward.</div>
+    <div class="info-grid" style="margin-top:6px">
+      <div class="info-row"><span class="info-key">Min. Bond</span><span class="info-val">1,000 SOLX</span></div>
+      <div class="info-row"><span class="info-key">Status</span><span class="info-val yellow" id="challengerStatus">Not yet active</span></div>
+    </div>
+  </div>
+
+  <div class="role-card">
+    <div class="role-title">Prover (ZK)</div>
+    <div>Generates ZK proofs for state transitions. Penalized for invalid proofs.</div>
+    <div class="info-grid" style="margin-top:6px">
+      <div class="info-row"><span class="info-key">Min. Bond</span><span class="info-val">1,000 SOLX</span></div>
+      <div class="info-row"><span class="info-key">Proving Penalty</span><span class="info-val">10 SOLX</span></div>
+      <div class="info-row"><span class="info-key">Initial Prover Bond</span><span class="info-val">200,000 SOLX</span></div>
+    </div>
+  </div>
+
+  <div class="role-card">
+    <div class="role-title">Sequencer</div>
+    <div>Produces DA batches and orders transactions. The preferred sequencer additionally has soft-confirmation and leader election.</div>
+    <div class="info-grid" style="margin-top:6px">
+      <div class="info-row"><span class="info-key">Min. Bond (Standard)</span><span class="info-val">10,000 SOLX</span></div>
+      <div class="info-row"><span class="info-key">Preferred Seq. Bond</span><span class="info-val">20M SOLX</span></div>
+    </div>
+  </div>
+
+  <div class="role-card">
+    <div class="role-title">Operator Incentives</div>
+    <div>Reward distribution to a designated address for operating the rollup.</div>
+    <div class="info-grid" style="margin-top:6px">
+      <div class="info-row"><span class="info-key">Reward Address</span><span class="info-val mono" style="font-size:10px">HjjEhif8..oxbcECv</span></div>
+    </div>
+  </div>
+
+  <h4>This Node's Status</h4>
+  <div class="info-grid">
+    <div class="info-row"><span class="info-key">Role</span><span class="info-val">Standard Sequencer (Full Node)</span></div>
+    <div class="info-row"><span class="info-key">Registered as Attester</span><span class="info-val red">No</span></div>
+    <div class="info-row"><span class="info-key">Registered as Prover</span><span class="info-val red">No</span></div>
+    <div class="info-row"><span class="info-key">Max. Attested Height</span><span class="info-val blue" id="infoMaxAttested">0</span></div>
+    <div class="info-row"><span class="info-key">Light Client Finalized</span><span class="info-val blue" id="infoLcFinalized">-</span></div>
+  </div>
+
+  <div class="info-note">
+    The attester/prover incentive system is implemented in the code but not yet open for external participants.
+    Currently only the preferred sequencer (Solaxy team) produces blocks. Registration is expected to be enabled in a later phase.
+    Until then: keep the node synced and wait.
+  </div>
+</div>
+
+<!-- Settings Panel -->
+<div class="settings-toggle" id="settingsToggle" onclick="toggleSettings()">
+  <h3>Settings</h3>
+  <span class="arrow">&#9654;</span>
+</div>
+<div class="settings-panel" id="settingsPanel">
+
+  <h4>DA Layer Settings</h4>
+  <div class="cfg-grid">
+    <div class="cfg-field"><label>Celestia RPC URL</label><input type="text" id="cfg_da_rpc_url"></div>
+    <div class="cfg-field"><label>Celestia RPC Auth Token</label><input type="password" id="cfg_da_rpc_auth_token"></div>
+    <div class="cfg-field"><label>Celestia gRPC URL</label><input type="text" id="cfg_da_grpc_url"></div>
+    <div class="cfg-field"><label>Signer Private Key</label><input type="password" id="cfg_da_signer_private_key"></div>
+  </div>
+
+  <h4>Storage Settings</h4>
+  <div class="cfg-grid">
+    <div class="cfg-field"><label>Data Path</label><input type="text" id="cfg_storage_path"></div>
+    <div class="cfg-field"><label>Pruner Versions to Keep</label><input type="number" id="cfg_storage_pruner_versions_to_keep"></div>
+    <div class="cfg-field"><label>User Commit Concurrency</label><input type="number" id="cfg_storage_user_commit_concurrency"></div>
+    <div class="cfg-field"><label>Kernel Commit Concurrency</label><input type="number" id="cfg_storage_kernel_commit_concurrency"></div>
+    <div class="cfg-field"><label>User Hashtable Buckets</label><input type="number" id="cfg_storage_user_hashtable_buckets"></div>
+    <div class="cfg-field"><label>User Page Cache Size</label><input type="number" id="cfg_storage_user_page_cache_size"></div>
+    <div class="cfg-field"><label>Kernel Page Cache Size</label><input type="number" id="cfg_storage_kernel_page_cache_size"></div>
+  </div>
+
+  <h4>Runner Settings</h4>
+  <div class="cfg-grid">
+    <div class="cfg-field"><label>DA Polling Interval (ms)</label><input type="number" id="cfg_runner_da_polling_interval_ms"></div>
+    <div class="cfg-field"><label>Concurrent Sync Tasks</label><input type="number" id="cfg_runner_concurrent_sync_tasks"></div>
+    <div class="cfg-field"><label>Pre-fetched Blocks Capacity</label><input type="number" id="cfg_runner_pre_fetched_blocks_capacity"></div>
+    <div class="cfg-toggle"><input type="checkbox" id="cfg_runner_save_tx_bodies"><label for="cfg_runner_save_tx_bodies">Save TX Bodies</label></div>
+    <div class="cfg-field"><label>HTTP Bind Host</label><input type="text" id="cfg_runner_http_config_bind_host"></div>
+    <div class="cfg-field"><label>HTTP Bind Port</label><input type="number" id="cfg_runner_http_config_bind_port"></div>
+  </div>
+
+  <h4>Monitoring</h4>
+  <div class="cfg-grid">
+    <div class="cfg-field"><label>Telegraf Address</label><input type="text" id="cfg_monitoring_telegraf_address"></div>
+  </div>
+
+  <h4>Proof Manager</h4>
+  <div class="cfg-grid">
+    <div class="cfg-field"><label>Aggregated Proof Block Jump</label><input type="number" id="cfg_proof_manager_aggregated_proof_block_jump"></div>
+    <div class="cfg-field"><label>Prover Address</label><input type="text" id="cfg_proof_manager_prover_address"></div>
+    <div class="cfg-field"><label>Max Transitions in DB</label><input type="number" id="cfg_proof_manager_max_number_of_transitions_in_db"></div>
+    <div class="cfg-field"><label>Max Transitions in Memory</label><input type="number" id="cfg_proof_manager_max_number_of_transitions_in_memory"></div>
+  </div>
+
+  <h4>Sequencer</h4>
+  <div class="cfg-grid">
+    <div class="cfg-field"><label>Rollup Address</label><input type="text" id="cfg_sequencer_rollup_address"></div>
+    <div class="cfg-field"><label>Max Allowed Node Distance Behind</label><input type="number" id="cfg_sequencer_max_allowed_node_distance_behind"></div>
+    <div class="cfg-field"><label>Max Concurrent Blobs</label><input type="number" id="cfg_sequencer_max_concurrent_blobs"></div>
+    <div class="cfg-field"><label>Max Batch Size (bytes)</label><input type="number" id="cfg_sequencer_max_batch_size_bytes"></div>
+    <div class="cfg-field"><label>Blob Processing Timeout (secs)</label><input type="number" id="cfg_sequencer_blob_processing_timeout_secs"></div>
+  </div>
+
+  <h4>Service Controls</h4>
+  <div style="display:grid;gap:8px">
+    <div class="svc-row">
+      <span class="svc-name">solaxy-node</span>
+      <span class="svc-badge" id="svcBadgeSolaxy">-</span>
+      <div class="svc-btns">
+        <button class="btn btn-sm btn-secondary" onclick="svcAction('solaxy-node','start')">Start</button>
+        <button class="btn btn-sm btn-danger" onclick="svcAction('solaxy-node','stop')">Stop</button>
+        <button class="btn btn-sm btn-secondary" onclick="svcAction('solaxy-node','restart')">Restart</button>
+      </div>
+    </div>
+    <div class="svc-row">
+      <span class="svc-name">celestia-light</span>
+      <span class="svc-badge" id="svcBadgeCelestia">-</span>
+      <div class="svc-btns">
+        <button class="btn btn-sm btn-secondary" onclick="svcAction('celestia-light','start')">Start</button>
+        <button class="btn btn-sm btn-danger" onclick="svcAction('celestia-light','stop')">Stop</button>
+        <button class="btn btn-sm btn-secondary" onclick="svcAction('celestia-light','restart')">Restart</button>
+      </div>
+    </div>
+    <div class="svc-row">
+      <span class="svc-name">postgresql</span>
+      <span class="svc-badge" id="svcBadgePostgres">-</span>
+      <div class="svc-btns">
+        <button class="btn btn-sm btn-secondary" onclick="svcAction('postgresql','start')">Start</button>
+        <button class="btn btn-sm btn-danger" onclick="svcAction('postgresql','stop')">Stop</button>
+        <button class="btn btn-sm btn-secondary" onclick="svcAction('postgresql','restart')">Restart</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="cfg-actions">
+    <button class="btn btn-primary" onclick="saveConfig(false)">Save Config</button>
+    <button class="btn btn-secondary" onclick="saveConfig(true)">Save &amp; Restart Node</button>
+    <button class="btn btn-secondary" onclick="loadConfig()">Reload</button>
+    <span class="cfg-saved" id="cfgSaved">Saved</span>
+    <span class="cfg-error" id="cfgError"></span>
+  </div>
+</div>
+
+<!-- Logs Section -->
+<div class="tabs">
+  <div class="tab active" data-service="solaxy" onclick="switchTab(this)">Solaxy</div>
+  <div class="tab" data-service="celestia" onclick="switchTab(this)">Celestia</div>
+  <div class="tab" data-service="postgresql" onclick="switchTab(this)">PostgreSQL</div>
+</div>
+<div class="log-container" id="logContainer"></div>
+
+<script>
+let currentLogService = 'solaxy';
+let autoScroll = true;
+
+const logContainer = document.getElementById('logContainer');
+logContainer.addEventListener('scroll', () => {
+  const atBottom = logContainer.scrollHeight - logContainer.scrollTop - logContainer.clientHeight < 50;
+  autoScroll = atBottom;
+});
+
+function num(n) {
+  if (n == null) return '-';
+  return Number(n).toLocaleString();
+}
+
+function setBadge(id, active) {
+  const el = document.getElementById(id);
+  if (active) { el.textContent = 'RUNNING'; el.className = 'badge badge-ok'; }
+  else { el.textContent = 'DOWN'; el.className = 'badge badge-err'; }
+}
+
+function updateStats(data) {
+  // Solaxy
+  const sol = data.solaxy;
+  setBadge('solaxyBadge', sol.service.active);
+  document.getElementById('solSlot').textContent = num(sol.sync.slot_number);
+  document.getElementById('solBlockTime').textContent = sol.sync.block_time_ms != null ? sol.sync.block_time_ms + ' ms' : '-';
+  document.getElementById('solMem').textContent = sol.service.memory_mb != null ? sol.service.memory_mb + ' MB' : '-';
+  document.getElementById('solCpu').textContent = sol.service.cpu_seconds != null ? sol.service.cpu_seconds + 's' : '-';
+
+  if (sol.sync.synced_da_height) {
+    const synced = sol.sync.synced_da_height;
+    const target = sol.sync.target_da_height || synced;
+    const genesis = 9910000;
+    const pct = target > genesis ? Math.min(100, ((synced - genesis) / (target - genesis) * 100)).toFixed(1) : '100.0';
+    const isSynced = (target - synced) < 5;
+    document.getElementById('solSyncBar').style.width = pct + '%';
+    document.getElementById('solSyncBar').textContent = isSynced ? 'Synced' : pct + '%';
+    if (isSynced) document.getElementById('solSyncBar').style.background = 'linear-gradient(90deg,#238636,#3fb950)';
+    document.getElementById('solSyncFrom').textContent = isSynced ? 'DA ' + num(synced) : num(synced);
+    document.getElementById('solSyncTo').textContent = isSynced ? 'Live' : num(target);
+  }
+
+  // Celestia
+  const cel = data.celestia;
+  setBadge('celestiaBadge', cel.service.active);
+  document.getElementById('celHead').textContent = num(cel.sync.height);
+  document.getElementById('celMem').textContent = cel.service.memory_mb != null ? cel.service.memory_mb + ' MB' : '-';
+
+  if (cel.das) {
+    const sampled = cel.das.head_of_sampled_chain || 0;
+    const netHead = cel.das.network_head_height || 0;
+    document.getElementById('celDas').textContent = num(sampled);
+    if (netHead > 0) {
+      const dasPct = Math.min(100, (sampled / netHead * 100)).toFixed(2);
+      document.getElementById('celDasBar').style.width = dasPct + '%';
+      document.getElementById('celDasBar').textContent = dasPct + '%';
+    }
+  }
+
+  if (cel.balance && cel.balance.amount != null) {
+    const tia = (parseInt(cel.balance.amount) / 1e6).toFixed(2);
+    document.getElementById('celBalance').textContent = tia + ' TIA';
+  }
+
+  if (cel.p2p && cel.p2p.id) {
+    document.getElementById('celPeerId').textContent = 'Peer: ' + cel.p2p.id;
+  }
+
+  // RPC Stats
+  const rpc = data.rpc;
+  if (rpc) {
+    const loc = rpc.local || {};
+    const net = rpc.network || {};
+    const netSlot = net.slot;
+    const netReachable = netSlot != null;
+
+    const rpcEl = document.getElementById('rpcBadge');
+    if (netReachable) { rpcEl.textContent = 'LIVE'; rpcEl.className = 'badge badge-ok'; }
+    else { rpcEl.textContent = 'OFFLINE'; rpcEl.className = 'badge badge-err'; }
+
+    // Show sovereign slot from sync data (the real local progress)
+    if (sol.sync.slot_number) {
+      document.getElementById('sovSlot').textContent = num(sol.sync.slot_number);
+    }
+    document.getElementById('netSlot').textContent = num(netSlot);
+    document.getElementById('netTxCount').textContent = num(net.tx_count);
+    document.getElementById('netEpoch').textContent = net.epoch != null ? num(net.epoch) : '-';
+    document.getElementById('localSvmSlot').textContent = num(loc.slot);
+  }
+
+  // PostgreSQL
+  const pg = data.postgresql;
+  setBadge('pgBadge', pg.db.connected);
+  document.getElementById('pgBlocks').textContent = num(pg.db.blocks_count);
+  document.getElementById('pgTxs').textContent = num(pg.db.transactions_count);
+  document.getElementById('pgAccounts').textContent = num(pg.db.accounts_count);
+  document.getElementById('pgSize').textContent = pg.db.db_size || '-';
+
+  // System
+  const sys = data.system;
+  document.getElementById('sysDisk').textContent =
+    sys.disk_used_gb + 'G / ' + sys.disk_total_gb + 'G (' + sys.disk_percent + '%)';
+  if (sys.memory) {
+    document.getElementById('sysMem').textContent =
+      sys.memory.used_gb + 'G / ' + sys.memory.total_gb + 'G';
+    if (sys.memory.percent != null) {
+      const mp = document.getElementById('sysMemPct');
+      mp.textContent = sys.memory.percent + '%';
+      mp.style.color = sys.memory.percent > 85 ? '#f85149' : sys.memory.percent > 70 ? '#d29922' : '#3fb950';
+    }
+  }
+  if (sys.load) {
+    document.getElementById('sysCpuLoad').textContent =
+      sys.load['1m'] + ' / ' + sys.load['5m'] + ' / ' + sys.load['15m'];
+  }
+  if (sys.cpu_percent != null) {
+    const cp = document.getElementById('sysCpuPct');
+    cp.textContent = sys.cpu_percent + '%';
+    cp.style.color = sys.cpu_percent > 85 ? '#f85149' : sys.cpu_percent > 60 ? '#d29922' : '#3fb950';
+  }
+  if (sys.temps) {
+    if (sys.temps.k10temp != null) {
+      const te = document.getElementById('sysTempCpu');
+      te.textContent = sys.temps.k10temp + ' °C';
+      te.style.color = sys.temps.k10temp > 85 ? '#f85149' : sys.temps.k10temp > 70 ? '#d29922' : '#3fb950';
+    }
+    if (sys.temps.amdgpu != null) {
+      const tg = document.getElementById('sysTempGpu');
+      tg.textContent = sys.temps.amdgpu + ' °C';
+      tg.style.color = sys.temps.amdgpu > 85 ? '#f85149' : sys.temps.amdgpu > 70 ? '#d29922' : '#3fb950';
+    }
+  }
+  if (sys.disk_io) {
+    const r = (sys.disk_io.read_mb / 1024).toFixed(1);
+    const w = (sys.disk_io.write_mb / 1024).toFixed(1);
+    document.getElementById('sysDiskIo').textContent = r + ' GB / ' + w + ' GB';
+  }
+  if (sys.net) {
+    document.getElementById('sysNetRx').textContent = sys.net.rx_gb + ' GB (' + sys.net.interface + ')';
+    document.getElementById('sysNetTx').textContent = sys.net.tx_gb + ' GB';
+  }
+  if (sys.uptime) {
+    document.getElementById('sysUptime').textContent = 'up ' + sys.uptime;
+  }
+
+  document.getElementById('lastUpdate').textContent =
+    'Updated: ' + new Date().toLocaleTimeString();
+}
+
+function classifyLine(line) {
+  const lower = line.toLowerCase();
+  if (lower.includes('error') || lower.includes('panic')) return 'error';
+  if (lower.includes('warn')) return 'warn';
+  if (lower.includes('debug')) return 'debug';
+  return 'info';
+}
+
+function updateLogs(data) {
+  const html = data.lines.map(line => {
+    const cls = classifyLine(line);
+    const escaped = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return '<div class="log-line ' + cls + '">' + escaped + '</div>';
+  }).join('');
+  logContainer.innerHTML = html;
+  if (autoScroll) {
+    logContainer.scrollTop = logContainer.scrollHeight;
+  }
+}
+
+function switchTab(el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  currentLogService = el.dataset.service;
+  fetchLogs();
+}
+
+async function fetchStats() {
+  try {
+    const r = await fetch('/api/stats');
+    const data = await r.json();
+    updateStats(data);
+  } catch (e) {
+    console.error('Stats fetch failed:', e);
+  }
+}
+
+async function fetchLogs() {
+  try {
+    const r = await fetch('/api/logs/' + currentLogService + '?lines=150');
+    const data = await r.json();
+    updateLogs(data);
+  } catch (e) {
+    console.error('Logs fetch failed:', e);
+  }
+}
+
+function toggleInfo() {
+  const toggle = document.getElementById('infoToggle');
+  const panel = document.getElementById('infoPanel');
+  toggle.classList.toggle('open');
+  panel.classList.toggle('open');
+}
+
+function updateAttesterInfo(data) {
+  if (!data) return;
+  const el = document.getElementById('infoMaxAttested');
+  if (el && data.max_attested_height != null) el.textContent = num(data.max_attested_height);
+  const lc = document.getElementById('infoLcFinalized');
+  if (lc && data.lc_finalized_height != null) lc.textContent = num(data.lc_finalized_height);
+  const as = document.getElementById('attesterStatus');
+  if (as && data.bonded_attesters != null) {
+    if (data.bonded_attesters > 0) { as.textContent = data.bonded_attesters + ' active'; as.className = 'info-val green'; }
+    else { as.textContent = 'Not yet active'; as.className = 'info-val yellow'; }
+  }
+}
+
+function updateNodeIdentity(data) {
+  if (!data) return;
+  if (data.peer_id) document.getElementById('nodePeerId').textContent = data.peer_id;
+  if (data.wallet) document.getElementById('nodeCelWallet').textContent = data.wallet;
+  if (data.public_ip) document.getElementById('nodePublicIp').textContent = data.public_ip;
+  if (data.tia_balance != null) {
+    const tia = (parseInt(data.tia_balance) / 1e6).toFixed(2);
+    document.getElementById('nodeTiaBalance').textContent = tia + ' TIA';
+  }
+  if (data.solx_wallet) document.getElementById('nodeSolxWallet').textContent = data.solx_wallet;
+  if (data.solx_balance != null) {
+    const solx = (parseInt(data.solx_balance) / 1e6).toFixed(2);
+    document.getElementById('nodeSolxBalance').textContent = solx + ' SOLX';
+  }
+}
+
+async function fetchAttesterInfo() {
+  try {
+    const r = await fetch('/api/attester-info');
+    const data = await r.json();
+    updateAttesterInfo(data);
+  } catch (e) {}
+}
+
+async function fetchNodeIdentity() {
+  try {
+    const r = await fetch('/api/node-identity');
+    const data = await r.json();
+    updateNodeIdentity(data);
+  } catch (e) {}
+}
+
+// ---------------------------------------------------------------------------
+// Settings panel
+// ---------------------------------------------------------------------------
+let configData = {};
+
+function toggleSettings() {
+  const toggle = document.getElementById('settingsToggle');
+  const panel = document.getElementById('settingsPanel');
+  toggle.classList.toggle('open');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open') && !configData.da) {
+    loadConfig();
+  }
+}
+
+function cfgId(section, key) {
+  return 'cfg_' + section + '_' + key;
+}
+
+function populateConfig(data) {
+  configData = data;
+  // DA
+  const da = data.da || {};
+  document.getElementById('cfg_da_rpc_url').value = da.rpc_url || '';
+  document.getElementById('cfg_da_rpc_auth_token').value = da.rpc_auth_token || '';
+  document.getElementById('cfg_da_grpc_url').value = da.grpc_url || '';
+  document.getElementById('cfg_da_signer_private_key').value = da.signer_private_key || '';
+
+  // Storage
+  const st = data.storage || {};
+  document.getElementById('cfg_storage_path').value = st.path || '';
+  document.getElementById('cfg_storage_pruner_versions_to_keep').value = st.pruner_versions_to_keep || '';
+  document.getElementById('cfg_storage_user_commit_concurrency').value = st.user_commit_concurrency || '';
+  document.getElementById('cfg_storage_kernel_commit_concurrency').value = st.kernel_commit_concurrency || '';
+  document.getElementById('cfg_storage_user_hashtable_buckets').value = st.user_hashtable_buckets || '';
+  document.getElementById('cfg_storage_user_page_cache_size').value = st.user_page_cache_size || '';
+  document.getElementById('cfg_storage_kernel_page_cache_size').value = st.kernel_page_cache_size || '';
+
+  // Runner
+  const rn = data.runner || {};
+  document.getElementById('cfg_runner_da_polling_interval_ms').value = rn.da_polling_interval_ms || '';
+  document.getElementById('cfg_runner_concurrent_sync_tasks').value = rn.concurrent_sync_tasks || '';
+  document.getElementById('cfg_runner_pre_fetched_blocks_capacity').value = rn.pre_fetched_blocks_capacity || '';
+  document.getElementById('cfg_runner_save_tx_bodies').checked = rn.save_tx_bodies !== false;
+  const http = rn.http_config || {};
+  document.getElementById('cfg_runner_http_config_bind_host').value = http.bind_host || '';
+  document.getElementById('cfg_runner_http_config_bind_port').value = http.bind_port || '';
+
+  // Monitoring
+  const mon = data.monitoring || {};
+  document.getElementById('cfg_monitoring_telegraf_address').value = mon.telegraf_address || '';
+
+  // Proof Manager
+  const pm = data.proof_manager || {};
+  document.getElementById('cfg_proof_manager_aggregated_proof_block_jump').value = pm.aggregated_proof_block_jump || '';
+  document.getElementById('cfg_proof_manager_prover_address').value = pm.prover_address || '';
+  document.getElementById('cfg_proof_manager_max_number_of_transitions_in_db').value = pm.max_number_of_transitions_in_db || '';
+  document.getElementById('cfg_proof_manager_max_number_of_transitions_in_memory').value = pm.max_number_of_transitions_in_memory || '';
+
+  // Sequencer
+  const sq = data.sequencer || {};
+  document.getElementById('cfg_sequencer_rollup_address').value = sq.rollup_address || '';
+  document.getElementById('cfg_sequencer_max_allowed_node_distance_behind').value = sq.max_allowed_node_distance_behind || '';
+  document.getElementById('cfg_sequencer_max_concurrent_blobs').value = sq.max_concurrent_blobs || '';
+  document.getElementById('cfg_sequencer_max_batch_size_bytes').value = sq.max_batch_size_bytes || '';
+  document.getElementById('cfg_sequencer_blob_processing_timeout_secs').value = sq.blob_processing_timeout_secs || '';
+}
+
+function collectConfig() {
+  const intVal = id => { const v = document.getElementById(id).value; return v ? parseInt(v, 10) : 0; };
+  const strVal = id => document.getElementById(id).value;
+
+  return {
+    da: {
+      rpc_url: strVal('cfg_da_rpc_url'),
+      rpc_auth_token: strVal('cfg_da_rpc_auth_token'),
+      grpc_url: strVal('cfg_da_grpc_url'),
+      signer_private_key: strVal('cfg_da_signer_private_key'),
+    },
+    storage: {
+      path: strVal('cfg_storage_path'),
+      pruner_versions_to_keep: intVal('cfg_storage_pruner_versions_to_keep'),
+      user_commit_concurrency: intVal('cfg_storage_user_commit_concurrency'),
+      kernel_commit_concurrency: intVal('cfg_storage_kernel_commit_concurrency'),
+      user_hashtable_buckets: intVal('cfg_storage_user_hashtable_buckets'),
+      user_page_cache_size: intVal('cfg_storage_user_page_cache_size'),
+      kernel_page_cache_size: intVal('cfg_storage_kernel_page_cache_size'),
+    },
+    runner: {
+      da_polling_interval_ms: intVal('cfg_runner_da_polling_interval_ms'),
+      concurrent_sync_tasks: intVal('cfg_runner_concurrent_sync_tasks'),
+      pre_fetched_blocks_capacity: intVal('cfg_runner_pre_fetched_blocks_capacity'),
+      save_tx_bodies: document.getElementById('cfg_runner_save_tx_bodies').checked,
+      http_config: {
+        bind_host: strVal('cfg_runner_http_config_bind_host'),
+        bind_port: intVal('cfg_runner_http_config_bind_port'),
+      },
+    },
+    monitoring: {
+      telegraf_address: strVal('cfg_monitoring_telegraf_address'),
+    },
+    proof_manager: {
+      aggregated_proof_block_jump: intVal('cfg_proof_manager_aggregated_proof_block_jump'),
+      prover_address: strVal('cfg_proof_manager_prover_address'),
+      max_number_of_transitions_in_db: intVal('cfg_proof_manager_max_number_of_transitions_in_db'),
+      max_number_of_transitions_in_memory: intVal('cfg_proof_manager_max_number_of_transitions_in_memory'),
+    },
+    sequencer: {
+      rollup_address: strVal('cfg_sequencer_rollup_address'),
+      max_allowed_node_distance_behind: intVal('cfg_sequencer_max_allowed_node_distance_behind'),
+      max_concurrent_blobs: intVal('cfg_sequencer_max_concurrent_blobs'),
+      max_batch_size_bytes: intVal('cfg_sequencer_max_batch_size_bytes'),
+      blob_processing_timeout_secs: intVal('cfg_sequencer_blob_processing_timeout_secs'),
+      standard: {},
+    },
+  };
+}
+
+async function loadConfig() {
+  try {
+    const r = await fetch('/api/config');
+    const data = await r.json();
+    populateConfig(data);
+  } catch (e) {
+    console.error('Config load failed:', e);
+  }
+}
+
+async function saveConfig(restart) {
+  const data = collectConfig();
+  if (restart) data._restart = true;
+
+  const saved = document.getElementById('cfgSaved');
+  const errEl = document.getElementById('cfgError');
+  saved.style.display = 'none';
+  errEl.style.display = 'none';
+
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data),
+    });
+    const result = await r.json();
+    if (result.ok) {
+      saved.style.display = 'flex';
+      setTimeout(() => { saved.style.display = 'none'; }, 3000);
+    } else {
+      errEl.textContent = result.error || 'Save failed';
+      errEl.style.display = 'flex';
+    }
+  } catch (e) {
+    errEl.textContent = 'Save failed: ' + e.message;
+    errEl.style.display = 'flex';
+  }
+}
+
+async function svcAction(name, action) {
+  try {
+    const r = await fetch('/api/service/' + name + '/' + action, {method: 'POST'});
+    const data = await r.json();
+    updateSvcBadges();
+  } catch (e) {
+    console.error('Service action failed:', e);
+  }
+}
+
+function updateSvcBadges() {
+  fetch('/api/stats').then(r => r.json()).then(data => {
+    setSvcBadge('svcBadgeSolaxy', data.solaxy.service.active);
+    setSvcBadge('svcBadgeCelestia', data.celestia.service.active);
+    setSvcBadge('svcBadgePostgres', data.postgresql.service.active || data.postgresql.db.connected);
+  }).catch(() => {});
+}
+
+function setSvcBadge(id, active) {
+  const el = document.getElementById(id);
+  if (active) { el.textContent = 'RUNNING'; el.className = 'svc-badge badge-ok'; }
+  else { el.textContent = 'STOPPED'; el.className = 'svc-badge badge-err'; }
+}
+
+// Initial load
+fetchStats();
+fetchLogs();
+fetchAttesterInfo();
+fetchNodeIdentity();
+
+// Auto-refresh
+setInterval(fetchStats, 5000);
+setInterval(fetchLogs, 3000);
+setInterval(fetchAttesterInfo, 30000);
+setInterval(fetchNodeIdentity, 60000);
+
+// Update service badges when stats update
+const origUpdateStats = updateStats;
+updateStats = function(data) {
+  origUpdateStats(data);
+  setSvcBadge('svcBadgeSolaxy', data.solaxy.service.active);
+  setSvcBadge('svcBadgeCelestia', data.celestia.service.active);
+  setSvcBadge('svcBadgePostgres', data.postgresql.service.active || data.postgresql.db.connected);
+};
+</script>
+</body>
+</html>

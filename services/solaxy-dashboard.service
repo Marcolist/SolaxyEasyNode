@@ -1,0 +1,15 @@
+[Unit]
+Description=Solaxy Node Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=%%USER%%
+Type=simple
+WorkingDirectory=%%HOME%%/dashboard
+ExecStart=/usr/bin/python3 %%HOME%%/dashboard/app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

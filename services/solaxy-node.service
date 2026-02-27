@@ -1,0 +1,18 @@
+[Unit]
+Description=Solaxy SVM Rollup Node
+After=network-online.target postgresql.service celestia-light.service
+Wants=network-online.target
+Requires=postgresql.service celestia-light.service
+
+[Service]
+User=%%USER%%
+Type=simple
+WorkingDirectory=%%HOME%%/svm-rollup
+Environment=SOV_PROVER_MODE=skip
+ExecStart=%%HOME%%/svm-rollup/svm-rollup --da-layer celestia --rollup-config-path config.toml --genesis-config-dir genesis
+Restart=on-failure
+RestartSec=15
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
