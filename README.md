@@ -5,10 +5,8 @@ One-line installer for a complete Solaxy node: **SVM Rollup + Celestia Light Nod
 ## Quick Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/USER/SolaxyEasyNode/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main/install.sh | bash
 ```
-
-> Replace `USER` with the GitHub username hosting this repo.
 
 ## What Gets Installed
 
