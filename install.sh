@@ -16,9 +16,6 @@ CELESTIA_REPO="https://github.com/celestiaorg/celestia-node.git"
 CELESTIA_VERSION="v0.28.4"
 GO_VERSION="1.25.1"
 
-# Celestia sync start point — must be at or before the earliest DA height the rollup needs
-CELESTIA_SYNC_FROM_HEIGHT="9884000"
-CELESTIA_SYNC_FROM_HASH="258D60B014C9E46361FB8A5D2A8F38C3D1479D0D56BB61AF8126BDE10E1F9677"
 CELESTIA_PRUNING_WINDOW="720h0m0s"
 
 USER_NAME="$(whoami)"
@@ -115,6 +112,32 @@ else
     warn "Genesis state already exists, skipping download."
 fi
 
+# Read genesis DA height from chain_state_zk.json and derive Celestia sync start
+GENESIS_DA_HEIGHT=""
+CHAIN_STATE_FILE="$USER_HOME/svm-rollup/genesis/chain_state_zk.json"
+if [[ -f "$CHAIN_STATE_FILE" ]]; then
+    GENESIS_DA_HEIGHT=$(python3 -c "import json; print(json.load(open('$CHAIN_STATE_FILE')).get('genesis_da_height', ''))" 2>/dev/null || true)
+fi
+
+if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
+    # Start syncing a few thousand blocks before genesis to have a margin
+    CELESTIA_SYNC_FROM_HEIGHT=$((GENESIS_DA_HEIGHT - 26000))
+    log "Genesis DA height: $GENESIS_DA_HEIGHT — Celestia will sync from $CELESTIA_SYNC_FROM_HEIGHT"
+
+    # Fetch the block hash from Celestia consensus RPC
+    CELESTIA_SYNC_FROM_HASH=$(curl -s "https://${CELESTIA_CORE_IP}/header?height=${CELESTIA_SYNC_FROM_HEIGHT}" \
+        | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['header']['last_block_id']['hash'])" 2>/dev/null || true)
+
+    if [[ -z "$CELESTIA_SYNC_FROM_HASH" ]]; then
+        warn "Could not fetch block hash for height $CELESTIA_SYNC_FROM_HEIGHT. Celestia will sync from network head."
+        CELESTIA_SYNC_FROM_HEIGHT=""
+    fi
+else
+    warn "Could not read genesis_da_height from chain_state_zk.json."
+    CELESTIA_SYNC_FROM_HEIGHT=""
+    CELESTIA_SYNC_FROM_HASH=""
+fi
+
 # ---------------------------------------------------------------------------
 # Step 4: Install Go (needed for Celestia)
 # ---------------------------------------------------------------------------
@@ -168,12 +191,15 @@ else
     warn "Celestia light node already initialized."
 fi
 
-# Configure Celestia to sync from rollup genesis DA height with extended pruning window
+# Configure Celestia pruning window and sync start point
 if [[ -f "$CELESTIA_STORE/config.toml" ]]; then
-    log "Configuring Celestia sync start and pruning window..."
-    sed -i "s|SyncFromHeight = .*|SyncFromHeight = ${CELESTIA_SYNC_FROM_HEIGHT}|" "$CELESTIA_STORE/config.toml"
-    sed -i "s|SyncFromHash = .*|SyncFromHash = \"${CELESTIA_SYNC_FROM_HASH}\"|" "$CELESTIA_STORE/config.toml"
+    log "Configuring Celestia pruning window..."
     sed -i "s|PruningWindow = .*|PruningWindow = \"${CELESTIA_PRUNING_WINDOW}\"|" "$CELESTIA_STORE/config.toml"
+    if [[ -n "$CELESTIA_SYNC_FROM_HEIGHT" && -n "$CELESTIA_SYNC_FROM_HASH" ]]; then
+        log "Setting Celestia sync start: height=$CELESTIA_SYNC_FROM_HEIGHT"
+        sed -i "s|SyncFromHeight = .*|SyncFromHeight = ${CELESTIA_SYNC_FROM_HEIGHT}|" "$CELESTIA_STORE/config.toml"
+        sed -i "s|SyncFromHash = .*|SyncFromHash = \"${CELESTIA_SYNC_FROM_HASH}\"|" "$CELESTIA_STORE/config.toml"
+    fi
 fi
 
 # Extract auth token
