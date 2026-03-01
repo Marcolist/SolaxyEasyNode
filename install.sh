@@ -90,6 +90,7 @@ if [[ ! -f "$USER_HOME/svm-rollup/svm-rollup" ]]; then
     log "Extracting svm-rollup..."
     pv svm-rollup.tar.gz | tar xzf - --strip-components=1 2>/dev/null || tar xzf svm-rollup.tar.gz --strip-components=1
     rm -f svm-rollup.tar.gz
+    rm -f config.toml   # remove tar template; will be generated with correct values later
     chmod +x svm-rollup
     log "svm-rollup extracted."
 else
