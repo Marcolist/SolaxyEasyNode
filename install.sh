@@ -494,8 +494,19 @@ echo ""
 
 LAN_IP=$(hostname -I | awk '{print $1}')
 
+# Read dashboard token (generated on first start of app.py)
+DASH_TOKEN=""
+if [[ -f "$USER_HOME/dashboard/telegram.json" ]]; then
+    DASH_TOKEN=$(python3 -c "import json; print(json.load(open('$USER_HOME/dashboard/telegram.json')).get('dashboard_token',''))" 2>/dev/null || true)
+fi
+
 echo -e "  Dashboard:    ${CYAN}http://${LAN_IP}:5555${NC}"
 echo -e "  LAN IP:       ${CYAN}${LAN_IP}${NC}"
+if [[ -n "$DASH_TOKEN" ]]; then
+    echo ""
+    echo -e "  Login Token:  ${YELLOW}${DASH_TOKEN}${NC}"
+    echo -e "  ${GREEN}(use this token to log in to the dashboard)${NC}"
+fi
 echo ""
 echo -e "  Service Status:"
 echo -e "    celestia-light:    $(systemctl is-active celestia-light.service)"

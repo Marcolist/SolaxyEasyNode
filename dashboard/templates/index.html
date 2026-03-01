@@ -52,13 +52,13 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
 
 .peer-id{font-size:10px;color:#484f58;word-break:break-all}
 
-.info-toggle{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px 16px;margin-bottom:16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none}
-.info-toggle:hover{border-color:#58a6ff}
-.info-toggle h3{margin:0;font-size:14px;color:#f0f6fc;display:flex;align-items:center;gap:8px}
-.info-toggle .arrow{color:#8b949e;transition:transform 0.2s;font-size:12px}
-.info-toggle.open .arrow{transform:rotate(90deg)}
-.info-panel{display:none;background:#161b22;border:1px solid #30363d;border-top:none;border-radius:0 0 8px 8px;margin-top:-17px;margin-bottom:16px;padding:16px;font-size:12px;line-height:1.7}
-.info-panel.open{display:block}
+.info-toggle,.uptime-toggle{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px 16px;margin-bottom:16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none}
+.info-toggle:hover,.uptime-toggle:hover{border-color:#58a6ff}
+.info-toggle h3,.uptime-toggle h3{margin:0;font-size:14px;color:#f0f6fc;display:flex;align-items:center;gap:8px}
+.info-toggle .arrow,.uptime-toggle .arrow{color:#8b949e;transition:transform 0.2s;font-size:12px}
+.info-toggle.open .arrow,.uptime-toggle.open .arrow{transform:rotate(90deg)}
+.info-panel,.uptime-panel{display:none;background:#161b22;border:1px solid #30363d;border-top:none;border-radius:0 0 8px 8px;margin-top:-17px;margin-bottom:16px;padding:16px;font-size:12px;line-height:1.7}
+.info-panel.open,.uptime-panel.open{display:block}
 .info-panel h4{color:#f0f6fc;font-size:13px;margin:14px 0 6px 0}
 .info-panel h4:first-child{margin-top:0}
 .info-panel .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px}
@@ -109,6 +109,29 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
 .cfg-saved{color:#3fb950;font-size:12px;display:none;align-items:center;gap:4px}
 .cfg-error{color:#f85149;font-size:12px;display:none;align-items:center;gap:4px}
 
+/* Sparkline */
+.sparkline-wrap{display:inline-flex;align-items:center;gap:6px}
+canvas.sparkline{vertical-align:middle}
+
+/* Uptime Timeline */
+.uptime-svc{margin-bottom:12px}
+.uptime-svc:last-child{margin-bottom:0}
+.uptime-svc-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.uptime-svc-name{color:#c9d1d9;font-weight:600;font-size:12px}
+.uptime-pct{font-size:12px;font-weight:600}
+.uptime-timeline{display:flex;height:14px;border-radius:3px;overflow:hidden;background:#21262d}
+.uptime-tick{min-width:1px;flex:1}
+.uptime-tick.up{background:#238636}
+.uptime-tick.down{background:#da3633}
+
+/* Update section */
+.update-output{background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:8px;font-size:11px;color:#8b949e;max-height:120px;overflow-y:auto;margin-top:8px;white-space:pre-wrap;display:none}
+
+/* Token display */
+.token-display{display:flex;align-items:center;gap:8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:6px 10px;font-size:11px;color:#c9d1d9;word-break:break-all}
+.token-display .copy-btn{background:#21262d;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:3px 8px;font-size:10px;cursor:pointer;white-space:nowrap;font-family:inherit}
+.token-display .copy-btn:hover{background:#30363d}
+
 @media(max-width:768px){
   .grid{grid-template-columns:1fr}
   .stat-grid{grid-template-columns:1fr}
@@ -142,7 +165,10 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
     <div class="stat-grid">
       <div class="stat"><span class="stat-label">Slot</span><span class="stat-value" id="solSlot">-</span></div>
       <div class="stat"><span class="stat-label">Block Time</span><span class="stat-value" id="solBlockTime">-</span></div>
-      <div class="stat"><span class="stat-label">DA Blocks/sec</span><span class="stat-value" id="solDaRate">-</span></div>
+      <div class="stat">
+        <span class="stat-label">DA Blocks/sec</span>
+        <span class="stat-value sparkline-wrap" id="solDaRate">-<canvas id="sparkDaRate" class="sparkline" width="100" height="30"></canvas></span>
+      </div>
       <div class="stat"><span class="stat-label">Memory</span><span class="stat-value" id="solMem">-</span></div>
       <div class="stat"><span class="stat-label">CPU</span><span class="stat-value" id="solCpu">-</span></div>
     </div>
@@ -217,6 +243,10 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
       <div style="margin-top:6px"><span class="stat-label">Celestia Wallet</span><div style="color:#58a6ff;font-size:11px;word-break:break-all" id="nodeCelWallet">-</div></div>
       <div style="margin-top:6px"><span class="stat-label">Public IP</span><div style="color:#c9d1d9" id="nodePublicIp">-</div></div>
       <div style="margin-top:6px"><span class="stat-label">TIA Balance</span><div style="color:#c9d1d9" id="nodeTiaBalance">-</div></div>
+      <div style="margin-top:4px;display:flex;gap:16px">
+        <div><span class="stat-label">24h TIA Change</span><div style="font-weight:600;font-size:13px" id="nodeTiaDelta">-</div></div>
+        <div><span class="stat-label">Daily Burn Rate</span><div style="font-weight:600;font-size:13px" id="nodeBurnRate">-</div></div>
+      </div>
       <div style="margin-top:10px;border-top:1px solid #30363d;padding-top:8px"><span class="stat-label">Solaxy L2 Wallet</span><div style="color:#58a6ff;font-size:11px;word-break:break-all" id="nodeSolxWallet">-</div></div>
       <div style="margin-top:6px"><span class="stat-label">SOLX Balance</span><div style="color:#c9d1d9" id="nodeSolxBalance">-</div></div>
     </div>
@@ -230,8 +260,14 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
     </div>
     <div class="stat-grid">
       <div class="stat"><span class="stat-label">CPU Load (1/5/15m)</span><span class="stat-value" id="sysCpuLoad">-</span></div>
-      <div class="stat"><span class="stat-label">CPU Usage</span><span class="stat-value" id="sysCpuPct">-</span></div>
-      <div class="stat"><span class="stat-label">Memory</span><span class="stat-value" id="sysMem">-</span></div>
+      <div class="stat">
+        <span class="stat-label">CPU Usage</span>
+        <span class="stat-value sparkline-wrap" id="sysCpuPct">-<canvas id="sparkCpu" class="sparkline" width="100" height="30"></canvas></span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">Memory</span>
+        <span class="stat-value sparkline-wrap" id="sysMem">-<canvas id="sparkMem" class="sparkline" width="100" height="30"></canvas></span>
+      </div>
       <div class="stat"><span class="stat-label">Memory Used</span><span class="stat-value" id="sysMemPct">-</span></div>
       <div class="stat"><span class="stat-label">CPU Temp</span><span class="stat-value" id="sysTempCpu">-</span></div>
       <div class="stat"><span class="stat-label">GPU Temp</span><span class="stat-value" id="sysTempGpu">-</span></div>
@@ -251,12 +287,14 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
     <div class="stat-grid">
       <div class="stat"><span class="stat-label">Chat ID</span><span class="stat-value mono" id="tgChatId">Not connected</span></div>
       <div class="stat"><span class="stat-label">Alerts</span><span class="stat-value" id="tgEnabled">-</span></div>
+      <div class="stat"><span class="stat-label">Auto-Restart</span><span class="stat-value" id="tgAutoRestart">-</span></div>
     </div>
     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
       <button class="btn btn-primary btn-sm" id="tgConnectBtn" onclick="connectTelegram()">Connect</button>
       <button class="btn btn-secondary btn-sm" id="tgConfirmBtn" onclick="confirmTelegram()" style="display:none">Confirm</button>
       <button class="btn btn-secondary btn-sm" id="tgTestBtn" onclick="testTelegram()">Send Test</button>
       <button class="btn btn-secondary btn-sm" id="tgToggleBtn" onclick="toggleTelegramAlerts()">Toggle Alerts</button>
+      <button class="btn btn-secondary btn-sm" id="tgAutoRestartBtn" onclick="toggleAutoRestart()">Toggle Auto-Restart</button>
     </div>
     <div id="tgLink" style="margin-top:8px;font-size:11px;display:none">
       <span style="color:#8b949e">1. Click:</span> <a id="tgLinkA" href="#" target="_blank" style="color:#58a6ff"></a><br>
@@ -269,8 +307,25 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
       <div><span style="color:#58a6ff">/log</span> — Last 20 solaxy-node log lines</div>
       <div><span style="color:#58a6ff">/log celestia</span> — Celestia log lines</div>
       <div><span style="color:#58a6ff">/log postgresql</span> — PostgreSQL log lines</div>
+      <div><span style="color:#58a6ff">/balance</span> — TIA &amp; SOLX balance + 24h delta</div>
+      <div><span style="color:#58a6ff">/restart &lt;svc&gt;</span> — Restart a service</div>
+      <div><span style="color:#58a6ff">/start &lt;svc&gt;</span> — Start a service</div>
+      <div><span style="color:#58a6ff">/stop &lt;svc&gt;</span> — Stop a service</div>
+      <div><span style="color:#58a6ff">/autorestart</span> — Toggle auto-restart</div>
+      <div><span style="color:#58a6ff">/update</span> — Pull &amp; update dashboard</div>
       <div><span style="color:#58a6ff">/help</span> — Show available commands</div>
     </div>
+  </div>
+</div>
+
+<!-- Uptime History Panel -->
+<div class="uptime-toggle" id="uptimeToggle" onclick="toggleUptime()">
+  <h3>Uptime History</h3>
+  <span class="arrow">&#9654;</span>
+</div>
+<div class="uptime-panel" id="uptimePanel">
+  <div id="uptimeContent">
+    <div style="color:#8b949e;font-size:12px">Loading uptime data...</div>
   </div>
 </div>
 
@@ -360,6 +415,20 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
   <span class="arrow">&#9654;</span>
 </div>
 <div class="settings-panel" id="settingsPanel">
+
+  <h4>Dashboard Token</h4>
+  <div style="margin-bottom:8px;color:#8b949e;font-size:11px">Use this token to log in to the dashboard. Keep it safe.</div>
+  <div class="token-display">
+    <span id="dashToken" style="flex:1">-</span>
+    <button class="copy-btn" onclick="copyToken()">Copy</button>
+  </div>
+
+  <h4>Dashboard Update</h4>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn btn-primary btn-sm" onclick="pullUpdate()">Pull Update</button>
+    <button class="btn btn-danger btn-sm" onclick="restartDashboard()">Restart Dashboard</button>
+  </div>
+  <div class="update-output" id="updateOutput"></div>
 
   <h4>DA Layer Settings</h4>
   <div class="cfg-grid">
@@ -482,6 +551,38 @@ function setBadge(id, active, text, cls) {
   else { el.textContent = 'DOWN'; el.className = 'badge badge-err'; }
 }
 
+// ---------------------------------------------------------------------------
+// Sparkline Charts (pure Canvas, no library)
+// ---------------------------------------------------------------------------
+function drawSparkline(canvasId, data, color) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas || !data || data.length < 2) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  const filtered = data.filter(v => v != null);
+  if (filtered.length < 2) return;
+
+  const min = Math.min(...filtered);
+  const max = Math.max(...filtered);
+  const range = max - min || 1;
+  const pad = 2;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+
+  for (let i = 0; i < filtered.length; i++) {
+    const x = (i / (filtered.length - 1)) * (w - pad * 2) + pad;
+    const y = h - pad - ((filtered[i] - min) / range) * (h - pad * 2);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
 function updateStats(data) {
   // Solaxy
   const sol = data.solaxy;
@@ -502,7 +603,13 @@ function updateStats(data) {
   if (sol.sync.da_blocks_per_sec != null) {
     const rate = sol.sync.da_blocks_per_sec;
     const el = document.getElementById('solDaRate');
-    el.textContent = rate > 0 ? rate + '/s' : 'idle';
+    // Keep sparkline canvas — only update text node
+    const textNode = el.childNodes[0];
+    if (textNode && textNode.nodeType === 3) {
+      textNode.textContent = rate > 0 ? rate + '/s' : 'idle';
+    } else {
+      el.insertBefore(document.createTextNode(rate > 0 ? rate + '/s' : 'idle'), el.firstChild);
+    }
     el.style.color = rate > 0 ? '#3fb950' : '#8b949e';
   }
   document.getElementById('solMem').textContent = sol.service.memory_mb != null ? sol.service.memory_mb + ' MB' : '-';
@@ -593,8 +700,13 @@ function updateStats(data) {
   document.getElementById('sysDisk').textContent =
     sys.disk_used_gb + 'G / ' + sys.disk_total_gb + 'G (' + sys.disk_percent + '%)';
   if (sys.memory) {
-    document.getElementById('sysMem').textContent =
-      sys.memory.used_gb + 'G / ' + sys.memory.total_gb + 'G';
+    // Update text but keep sparkline canvas
+    const memEl = document.getElementById('sysMem');
+    const memText = sys.memory.used_gb + 'G / ' + sys.memory.total_gb + 'G';
+    const memNode = memEl.childNodes[0];
+    if (memNode && memNode.nodeType === 3) memNode.textContent = memText;
+    else memEl.insertBefore(document.createTextNode(memText), memEl.firstChild);
+
     if (sys.memory.percent != null) {
       const mp = document.getElementById('sysMemPct');
       mp.textContent = sys.memory.percent + '%';
@@ -606,19 +718,22 @@ function updateStats(data) {
       sys.load['1m'] + ' / ' + sys.load['5m'] + ' / ' + sys.load['15m'];
   }
   if (sys.cpu_percent != null) {
-    const cp = document.getElementById('sysCpuPct');
-    cp.textContent = sys.cpu_percent + '%';
-    cp.style.color = sys.cpu_percent > 85 ? '#f85149' : sys.cpu_percent > 60 ? '#d29922' : '#3fb950';
+    const cpEl = document.getElementById('sysCpuPct');
+    const cpText = sys.cpu_percent + '%';
+    const cpNode = cpEl.childNodes[0];
+    if (cpNode && cpNode.nodeType === 3) cpNode.textContent = cpText;
+    else cpEl.insertBefore(document.createTextNode(cpText), cpEl.firstChild);
+    cpEl.style.color = sys.cpu_percent > 85 ? '#f85149' : sys.cpu_percent > 60 ? '#d29922' : '#3fb950';
   }
   if (sys.temps) {
     if (sys.temps.k10temp != null) {
       const te = document.getElementById('sysTempCpu');
-      te.textContent = sys.temps.k10temp + ' °C';
+      te.textContent = sys.temps.k10temp + ' C';
       te.style.color = sys.temps.k10temp > 85 ? '#f85149' : sys.temps.k10temp > 70 ? '#d29922' : '#3fb950';
     }
     if (sys.temps.amdgpu != null) {
       const tg = document.getElementById('sysTempGpu');
-      tg.textContent = sys.temps.amdgpu + ' °C';
+      tg.textContent = sys.temps.amdgpu + ' C';
       tg.style.color = sys.temps.amdgpu > 85 ? '#f85149' : sys.temps.amdgpu > 70 ? '#d29922' : '#3fb950';
     }
   }
@@ -693,6 +808,16 @@ function toggleInfo() {
   panel.classList.toggle('open');
 }
 
+function toggleUptime() {
+  const toggle = document.getElementById('uptimeToggle');
+  const panel = document.getElementById('uptimePanel');
+  toggle.classList.toggle('open');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) {
+    fetchUptime();
+  }
+}
+
 function updateAttesterInfo(data) {
   if (!data) return;
   const el = document.getElementById('infoMaxAttested');
@@ -735,6 +860,80 @@ async function fetchNodeIdentity() {
     const r = await fetch('/api/node-identity');
     const data = await r.json();
     updateNodeIdentity(data);
+  } catch (e) {}
+}
+
+// ---------------------------------------------------------------------------
+// Uptime History
+// ---------------------------------------------------------------------------
+async function fetchUptime() {
+  try {
+    const r = await fetch('/api/uptime?hours=24');
+    const data = await r.json();
+    renderUptime(data);
+  } catch (e) {
+    document.getElementById('uptimeContent').innerHTML = '<div style="color:#f85149;font-size:12px">Failed to load uptime data</div>';
+  }
+}
+
+function renderUptime(data) {
+  const container = document.getElementById('uptimeContent');
+  let html = '';
+  const services = ['solaxy-node', 'celestia-light', 'postgresql'];
+  for (const svc of services) {
+    const info = data[svc];
+    if (!info) continue;
+    const pct = info.uptime_pct;
+    const pctColor = pct >= 99.5 ? '#3fb950' : pct >= 95 ? '#d29922' : '#f85149';
+    html += '<div class="uptime-svc">';
+    html += '<div class="uptime-svc-header">';
+    html += '<span class="uptime-svc-name">' + svc + '</span>';
+    html += '<span class="uptime-pct" style="color:' + pctColor + '">' + pct.toFixed(2) + '%</span>';
+    html += '</div>';
+    html += '<div class="uptime-timeline">';
+    if (info.timeline && info.timeline.length > 0) {
+      for (const tick of info.timeline) {
+        html += '<div class="uptime-tick ' + (tick.up ? 'up' : 'down') + '"></div>';
+      }
+    } else {
+      html += '<div style="color:#8b949e;font-size:11px;padding:0 8px;display:flex;align-items:center">No data yet</div>';
+    }
+    html += '</div></div>';
+  }
+  if (!html) html = '<div style="color:#8b949e;font-size:12px">No uptime data recorded yet. Data appears after ~2 minutes.</div>';
+  container.innerHTML = html;
+}
+
+// ---------------------------------------------------------------------------
+// Balance History (for Node Identity card)
+// ---------------------------------------------------------------------------
+async function fetchBalanceHistory() {
+  try {
+    const r = await fetch('/api/balance-history?hours=24');
+    const data = await r.json();
+    if (data.tia_delta_24h != null) {
+      const deltaEl = document.getElementById('nodeTiaDelta');
+      const val = data.tia_delta_24h;
+      deltaEl.textContent = (val >= 0 ? '+' : '') + val.toFixed(4) + ' TIA';
+      deltaEl.style.color = val >= 0 ? '#3fb950' : '#f85149';
+    }
+    if (data.daily_burn_rate != null) {
+      document.getElementById('nodeBurnRate').textContent = data.daily_burn_rate.toFixed(4) + ' TIA/day';
+      document.getElementById('nodeBurnRate').style.color = '#d29922';
+    }
+  } catch (e) {}
+}
+
+// ---------------------------------------------------------------------------
+// Metrics History (for Sparklines)
+// ---------------------------------------------------------------------------
+async function fetchMetricsHistory() {
+  try {
+    const r = await fetch('/api/metrics-history?minutes=60');
+    const data = await r.json();
+    if (data.cpu && data.cpu.length > 1) drawSparkline('sparkCpu', data.cpu, '#58a6ff');
+    if (data.memory && data.memory.length > 1) drawSparkline('sparkMem', data.memory, '#d29922');
+    if (data.da_rate && data.da_rate.length > 1) drawSparkline('sparkDaRate', data.da_rate, '#3fb950');
   } catch (e) {}
 }
 
@@ -927,6 +1126,7 @@ function updateTelegramUI(data) {
   const badge = document.getElementById('tgBadge');
   const chatId = document.getElementById('tgChatId');
   const enabled = document.getElementById('tgEnabled');
+  const autoRestart = document.getElementById('tgAutoRestart');
 
   chatId.textContent = data.chat_id || 'Not connected';
 
@@ -944,6 +1144,20 @@ function updateTelegramUI(data) {
     badge.className = 'badge badge-ok';
     enabled.textContent = 'On';
     enabled.style.color = '#3fb950';
+  }
+
+  // Auto-Restart status
+  if (data.auto_restart) {
+    autoRestart.textContent = 'On';
+    autoRestart.style.color = '#3fb950';
+  } else {
+    autoRestart.textContent = 'Off';
+    autoRestart.style.color = '#8b949e';
+  }
+
+  // Dashboard token
+  if (data.dashboard_token) {
+    document.getElementById('dashToken').textContent = data.dashboard_token;
   }
 }
 
@@ -1041,12 +1255,76 @@ async function toggleTelegramAlerts() {
   }
 }
 
+async function toggleAutoRestart() {
+  try {
+    const r = await fetch('/api/telegram/auto-restart', {method: 'POST'});
+    const data = await r.json();
+    if (data.ok) {
+      tgShowStatus('Auto-restart ' + (data.auto_restart ? 'enabled' : 'disabled'), false);
+      fetchTelegram();
+    }
+  } catch (e) {
+    tgShowStatus('Toggle failed: ' + e.message, true);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// One-Click Update
+// ---------------------------------------------------------------------------
+
+async function pullUpdate() {
+  const outputEl = document.getElementById('updateOutput');
+  outputEl.style.display = 'block';
+  outputEl.textContent = 'Pulling updates...';
+  try {
+    const r = await fetch('/api/update', {method: 'POST'});
+    const data = await r.json();
+    if (data.ok) {
+      outputEl.textContent = data.git_output || 'Done.';
+      outputEl.style.color = '#3fb950';
+    } else {
+      outputEl.textContent = 'Error: ' + (data.error || 'Unknown');
+      outputEl.style.color = '#f85149';
+    }
+  } catch (e) {
+    outputEl.textContent = 'Failed: ' + e.message;
+    outputEl.style.color = '#f85149';
+  }
+}
+
+async function restartDashboard() {
+  const outputEl = document.getElementById('updateOutput');
+  outputEl.style.display = 'block';
+  outputEl.textContent = 'Restarting dashboard service...';
+  try {
+    await fetch('/api/update/restart', {method: 'POST'});
+    outputEl.textContent = 'Restart initiated. Page will reload in 3s...';
+    outputEl.style.color = '#3fb950';
+    setTimeout(() => { window.location.reload(); }, 3000);
+  } catch (e) {
+    outputEl.textContent = 'Restart may have succeeded. Reloading...';
+    outputEl.style.color = '#d29922';
+    setTimeout(() => { window.location.reload(); }, 3000);
+  }
+}
+
+function copyToken() {
+  const token = document.getElementById('dashToken').textContent;
+  navigator.clipboard.writeText(token).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+  });
+}
+
 // Initial load
 fetchStats();
 fetchLogs();
 fetchAttesterInfo();
 fetchNodeIdentity();
 fetchTelegram();
+fetchBalanceHistory();
+fetchMetricsHistory();
 
 // Auto-refresh
 setInterval(fetchStats, 5000);
@@ -1054,6 +1332,8 @@ setInterval(fetchLogs, 3000);
 setInterval(fetchAttesterInfo, 30000);
 setInterval(fetchNodeIdentity, 60000);
 setInterval(fetchTelegram, 30000);
+setInterval(fetchBalanceHistory, 300000);
+setInterval(fetchMetricsHistory, 60000);
 
 // Update service badges when stats update
 const origUpdateStats = updateStats;

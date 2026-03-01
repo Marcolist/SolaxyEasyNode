@@ -4,7 +4,9 @@
 import json
 import os
 import re
+import secrets
 import shutil
+import sqlite3
 import subprocess
 import time
 import threading
@@ -12,7 +14,7 @@ from functools import lru_cache
 
 import psycopg2
 import requests
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, make_response
 
 try:
     import tomllib
@@ -43,6 +45,135 @@ _service_states_lock = threading.Lock()
 # Pending connect code (generated per connect attempt)
 _pending_connect_code = None
 
+# ---------------------------------------------------------------------------
+# SQLite Database for Uptime / Balance / Metrics History
+# ---------------------------------------------------------------------------
+UPTIME_DB_PATH = os.path.expanduser("~/dashboard/uptime.db")
+
+
+def _init_db():
+    """Create uptime.db with tables if they don't exist."""
+    conn = sqlite3.connect(UPTIME_DB_PATH)
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS uptime_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp REAL NOT NULL,
+        service TEXT NOT NULL,
+        active INTEGER NOT NULL
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS balance_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp REAL NOT NULL,
+        tia_balance REAL,
+        solx_balance REAL
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS metrics_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp REAL NOT NULL,
+        cpu_percent REAL,
+        memory_percent REAL,
+        da_rate REAL
+    )""")
+    conn.commit()
+    conn.close()
+
+
+_init_db()
+
+# ---------------------------------------------------------------------------
+# Auto-Restart Rate Limiting
+# ---------------------------------------------------------------------------
+_auto_restart_attempts = {}  # {service: [(timestamp, ...)] }
+_auto_restart_lock = threading.Lock()
+
+
+def _can_auto_restart(service):
+    """Check if auto-restart is allowed (max 2 per hour per service)."""
+    now = time.time()
+    with _auto_restart_lock:
+        attempts = _auto_restart_attempts.get(service, [])
+        # Remove attempts older than 1 hour
+        attempts = [t for t in attempts if now - t < 3600]
+        _auto_restart_attempts[service] = attempts
+        if len(attempts) >= 2:
+            return False
+        attempts.append(now)
+        _auto_restart_attempts[service] = attempts
+        return True
+
+
+# ---------------------------------------------------------------------------
+# Dashboard Token / Password Protection
+# ---------------------------------------------------------------------------
+
+def _ensure_dashboard_token():
+    """Generate a dashboard token on first start, save to telegram.json."""
+    cfg = telegram_load_config()
+    if not cfg.get("dashboard_token"):
+        cfg["dashboard_token"] = secrets.token_hex(24)
+        telegram_save_config(cfg)
+    return cfg["dashboard_token"]
+
+
+# Token initialized after telegram_load_config/telegram_save_config are defined (see below)
+
+# Login page HTML (inline, no extra template)
+_LOGIN_PAGE = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Solaxy Dashboard - Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:'SF Mono','Cascadia Code','Fira Code',monospace;
+display:flex;justify-content:center;align-items:center;min-height:100vh}
+.login-box{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;width:360px;text-align:center}
+.login-box h1{font-size:18px;color:#f0f6fc;margin-bottom:6px}
+.login-box h2{font-size:13px;color:#8b949e;font-weight:normal;margin-bottom:24px}
+.login-box input{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;
+padding:10px 12px;font-family:inherit;font-size:13px;margin-bottom:16px}
+.login-box input:focus{border-color:#58a6ff;outline:none}
+.login-box button{width:100%;background:#238636;color:#fff;border:none;border-radius:6px;padding:10px;
+font-family:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.login-box button:hover{background:#2ea043}
+.login-error{color:#f85149;font-size:12px;margin-top:12px;min-height:16px}
+</style></head><body>
+<div class="login-box">
+<h1>Solaxy Node Dashboard</h1>
+<h2>Enter dashboard token to continue</h2>
+<form onsubmit="doLogin(event)">
+<input type="password" id="tokenInput" placeholder="Dashboard Token" autofocus>
+<button type="submit">Login</button>
+</form>
+<div class="login-error" id="loginErr"></div>
+</div>
+<script>
+function doLogin(e){
+  e.preventDefault();
+  const token=document.getElementById('tokenInput').value.trim();
+  if(!token){document.getElementById('loginErr').textContent='Please enter a token';return;}
+  document.cookie='dashboard_token='+token+';path=/;max-age=2592000;SameSite=Lax';
+  window.location.reload();
+}
+</script></body></html>"""
+
+
+@app.before_request
+def _check_auth():
+    """Check dashboard token on every request."""
+    # Allow static files without auth
+    if request.path.startswith("/static/"):
+        return None
+    token = (
+        request.cookies.get("dashboard_token")
+        or request.args.get("token")
+        or (request.headers.get("Authorization", "").replace("Bearer ", "") if request.headers.get("Authorization") else None)
+    )
+    if token == _dashboard_token:
+        return None
+    # Not authenticated
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "unauthorized"}), 401
+    return make_response(_LOGIN_PAGE, 401)
+
 
 def telegram_load_config():
     """Load Telegram config from disk."""
@@ -57,6 +188,9 @@ def telegram_save_config(cfg):
     """Save Telegram config to disk."""
     with open(TELEGRAM_CONFIG_PATH, "w") as f:
         json.dump(cfg, f)
+
+
+_dashboard_token = _ensure_dashboard_token()
 
 
 def telegram_send_to(chat_id, text, parse_mode=None):
@@ -114,7 +248,7 @@ def telegram_find_chat_by_code(code):
 
 
 def _telegram_alert_loop():
-    """Background thread: check services every 60s and send alerts on state changes."""
+    """Background thread: check services every 60s, log uptime/metrics, auto-restart."""
     import socket
     hostname = socket.gethostname()
     services = ["solaxy-node", "celestia-light", "postgresql"]
@@ -122,22 +256,123 @@ def _telegram_alert_loop():
     while True:
         time.sleep(60)
         cfg = telegram_load_config()
-        if not cfg.get("enabled") or not cfg.get("chat_id"):
-            continue
+        now = time.time()
 
+        # Check service states and log to DB
         for svc in services:
             active = run_cmd(f"systemctl is-active {svc}") == "active"
+
+            # Write to uptime_log
+            try:
+                conn = sqlite3.connect(UPTIME_DB_PATH)
+                conn.execute(
+                    "INSERT INTO uptime_log (timestamp, service, active) VALUES (?, ?, ?)",
+                    (now, svc, 1 if active else 0),
+                )
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+
             with _service_states_lock:
                 prev = _service_states.get(svc)
                 _service_states[svc] = active
 
-            if prev is None:
-                # First check — just record state, don't alert
-                continue
-            if prev and not active:
-                telegram_send(f"⚠️ Service {svc} is DOWN on {hostname}")
-            elif not prev and active:
-                telegram_send(f"✅ Service {svc} is back UP on {hostname}")
+            if cfg.get("enabled") and cfg.get("chat_id"):
+                if prev is None:
+                    # First check -- just record state, don't alert
+                    pass
+                elif prev and not active:
+                    telegram_send(f"Warning: Service {svc} is DOWN on {hostname}")
+                    # Auto-restart if enabled
+                    if cfg.get("auto_restart") and _can_auto_restart(svc):
+                        svc_unit = ALLOWED_SERVICES.get(svc, f"{svc}.service")
+                        result = run_cmd(f"sudo systemctl restart {svc_unit}", timeout=30)
+                        new_status = run_cmd(f"systemctl is-active {svc}")
+                        if new_status == "active":
+                            telegram_send(f"Auto-restart: {svc} restarted successfully on {hostname}")
+                            with _service_states_lock:
+                                _service_states[svc] = True
+                        else:
+                            telegram_send(f"Auto-restart: {svc} restart FAILED on {hostname}")
+                elif not prev and active:
+                    telegram_send(f"Service {svc} is back UP on {hostname}")
+
+        # Log CPU/Memory/DA-Rate to metrics_log
+        try:
+            cpu_pct = None
+            with open("/proc/stat") as f:
+                line = f.readline().split()
+                total = sum(int(x) for x in line[1:])
+                idle = int(line[4])
+                cpu_pct = round((1 - idle / total) * 100, 1)
+        except Exception:
+            pass
+
+        mem_pct = None
+        mem_raw = run_cmd("free -b | grep Mem")
+        if mem_raw:
+            parts = mem_raw.split()
+            if len(parts) >= 7:
+                mem_pct = round(int(parts[2]) / int(parts[1]) * 100, 1)
+
+        da_rate = None
+        with _block_stats_lock:
+            if _block_stats["da_blocks_per_sec"] is not None:
+                da_rate = _block_stats["da_blocks_per_sec"]
+
+        try:
+            conn = sqlite3.connect(UPTIME_DB_PATH)
+            conn.execute(
+                "INSERT INTO metrics_log (timestamp, cpu_percent, memory_percent, da_rate) VALUES (?, ?, ?, ?)",
+                (now, cpu_pct, mem_pct, da_rate),
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+        # Auto-prune: delete entries older than 7 days
+        cutoff = now - 7 * 86400
+        try:
+            conn = sqlite3.connect(UPTIME_DB_PATH)
+            conn.execute("DELETE FROM uptime_log WHERE timestamp < ?", (cutoff,))
+            conn.execute("DELETE FROM balance_log WHERE timestamp < ?", (cutoff,))
+            conn.execute("DELETE FROM metrics_log WHERE timestamp < ?", (cutoff,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+
+def _balance_record_loop():
+    """Background thread: record TIA + SOLX balance every 5 minutes."""
+    while True:
+        time.sleep(300)
+        try:
+            info = node_identity()
+            tia_raw = info.get("tia_balance", "0")
+            tia = int(tia_raw) / 1e6 if tia_raw else 0
+            solx_raw = info.get("solx_balance", "0")
+            solx = int(solx_raw) / 1e6 if solx_raw else 0
+
+            conn = sqlite3.connect(UPTIME_DB_PATH)
+            conn.execute(
+                "INSERT INTO balance_log (timestamp, tia_balance, solx_balance) VALUES (?, ?, ?)",
+                (time.time(), tia, solx),
+            )
+            conn.commit()
+            conn.close()
+
+            # Check TIA low threshold alert
+            cfg = telegram_load_config()
+            threshold = cfg.get("tia_low_threshold", 0.5)
+            if cfg.get("enabled") and cfg.get("chat_id") and tia < threshold and tia > 0:
+                telegram_send(
+                    f"Warning: TIA balance is low: {tia:.4f} TIA (threshold: {threshold})"
+                )
+        except Exception:
+            pass
 
 
 def _telegram_build_health():
@@ -150,11 +385,11 @@ def _telegram_build_health():
         ("celestia-light", "celestia-light"),
         ("postgresql", "postgresql"),
     ]
-    lines = [f"📊 Health — {hostname}", ""]
+    lines = [f"Health -- {hostname}", ""]
     for label, svc in services:
         status = run_cmd(f"systemctl is-active {svc}")
-        icon = "✅" if status == "active" else "❌"
-        lines.append(f"{icon} {label}: {status}")
+        icon = "OK" if status == "active" else "FAIL"
+        lines.append(f"[{icon}] {label}: {status}")
 
     # Uptime
     try:
@@ -163,7 +398,7 @@ def _telegram_build_health():
             days, rem = divmod(secs, 86400)
             hours, rem = divmod(rem, 3600)
             mins, _ = divmod(rem, 60)
-            lines.append(f"\n⏱ Uptime: {days}d {hours}h {mins}m")
+            lines.append(f"\nUptime: {days}d {hours}h {mins}m")
     except Exception:
         pass
 
@@ -171,7 +406,7 @@ def _telegram_build_health():
     try:
         with open("/proc/loadavg") as f:
             load1 = f.read().split()[0]
-            lines.append(f"🖥 CPU Load (1m): {load1}")
+            lines.append(f"CPU Load (1m): {load1}")
     except Exception:
         pass
 
@@ -182,13 +417,13 @@ def _telegram_build_health():
             used_gb = round(int(parts[2]) / 1024**3, 1)
             total_gb = round(int(parts[1]) / 1024**3, 1)
             pct = round(int(parts[2]) / int(parts[1]) * 100, 1)
-            lines.append(f"🧠 Memory: {used_gb}G / {total_gb}G ({pct}%)")
+            lines.append(f"Memory: {used_gb}G / {total_gb}G ({pct}%)")
 
     # Disk
     import shutil as _shutil
     disk = _shutil.disk_usage("/")
     disk_pct = round(disk.used / disk.total * 100, 1)
-    lines.append(f"💾 Disk: {round(disk.used / 1024**3)}G / {round(disk.total / 1024**3)}G ({disk_pct}%)")
+    lines.append(f"Disk: {round(disk.used / 1024**3)}G / {round(disk.total / 1024**3)}G ({disk_pct}%)")
 
     return "\n".join(lines)
 
@@ -206,13 +441,46 @@ def _telegram_build_log(service="solaxy"):
     label = service if service in svc_map else "solaxy"
     raw = run_cmd(f"journalctl -u {svc} -n 20 --no-pager -o short-iso 2>/dev/null")
     if not raw:
-        return f"📋 No logs for {label} on {hostname}"
-    # Telegram has a 4096 char limit — truncate if needed
-    header = f"📋 Last 20 lines — {label} @ {hostname}\n\n"
+        return f"No logs for {label} on {hostname}"
+    # Telegram has a 4096 char limit -- truncate if needed
+    header = f"Last 20 lines -- {label} @ {hostname}\n\n"
     max_len = 4096 - len(header)
     if len(raw) > max_len:
         raw = raw[-max_len:]
     return header + raw
+
+
+def _telegram_build_balance():
+    """Build balance info text for /balance command."""
+    info = node_identity()
+    tia_raw = info.get("tia_balance", "0")
+    tia = int(tia_raw) / 1e6 if tia_raw else 0
+    solx_raw = info.get("solx_balance", "0")
+    solx = int(solx_raw) / 1e6 if solx_raw else 0
+
+    lines = [f"TIA: {tia:.4f}", f"SOLX: {solx:.2f}"]
+
+    # 24h delta
+    try:
+        conn = sqlite3.connect(UPTIME_DB_PATH)
+        c = conn.cursor()
+        cutoff = time.time() - 86400
+        c.execute(
+            "SELECT tia_balance, solx_balance FROM balance_log WHERE timestamp > ? ORDER BY timestamp ASC LIMIT 1",
+            (cutoff,),
+        )
+        row = c.fetchone()
+        conn.close()
+        if row:
+            tia_delta = tia - row[0]
+            solx_delta = solx - row[1]
+            lines.append(f"\n24h Change:")
+            lines.append(f"  TIA: {tia_delta:+.4f}")
+            lines.append(f"  SOLX: {solx_delta:+.2f}")
+    except Exception:
+        pass
+
+    return "\n".join(lines)
 
 
 # Offset tracker for the command polling loop
@@ -253,22 +521,81 @@ def _telegram_command_loop():
                     continue
 
                 cmd = text.split("@")[0]  # strip @botname suffix
+                parts = cmd.split(None, 1)
+                base_cmd = parts[0] if parts else ""
+                cmd_arg = parts[1] if len(parts) > 1 else ""
 
-                if cmd == "/health":
+                if base_cmd == "/health":
                     telegram_send_to(chat_id, _telegram_build_health())
-                elif cmd.startswith("/log"):
-                    parts = text.split(None, 1)
-                    service = parts[1] if len(parts) > 1 else "solaxy"
+
+                elif base_cmd == "/log":
+                    service = cmd_arg if cmd_arg else "solaxy"
                     telegram_send_to(chat_id, _telegram_build_log(service))
-                elif cmd in ("/start", "/help"):
+
+                elif base_cmd == "/balance":
+                    telegram_send_to(chat_id, _telegram_build_balance())
+
+                elif base_cmd == "/autorestart":
+                    cfg = telegram_load_config()
+                    cfg["auto_restart"] = not cfg.get("auto_restart", False)
+                    telegram_save_config(cfg)
+                    status = "ON" if cfg["auto_restart"] else "OFF"
+                    telegram_send_to(chat_id, f"Auto-restart is now {status}")
+
+                elif base_cmd in ("/restart", "/stop") and cmd_arg:
+                    # Remote service control
+                    svc_name = cmd_arg.strip()
+                    if svc_name in ALLOWED_SERVICES:
+                        action = base_cmd.lstrip("/")
+                        svc_unit = ALLOWED_SERVICES[svc_name]
+                        run_cmd(f"sudo systemctl {action} {svc_unit}", timeout=30)
+                        new_status = run_cmd(f"systemctl is-active {svc_name}")
+                        telegram_send_to(
+                            chat_id,
+                            f"{action.title()}: {svc_name} -> {new_status}",
+                        )
+                    else:
+                        avail = ", ".join(ALLOWED_SERVICES.keys())
+                        telegram_send_to(chat_id, f"Unknown service: {svc_name}\nAvailable: {avail}")
+
+                elif base_cmd == "/start" and cmd_arg:
+                    # /start <service> — remote start (not /start bare which is welcome)
+                    svc_name = cmd_arg.strip()
+                    if svc_name in ALLOWED_SERVICES:
+                        svc_unit = ALLOWED_SERVICES[svc_name]
+                        run_cmd(f"sudo systemctl start {svc_unit}", timeout=30)
+                        new_status = run_cmd(f"systemctl is-active {svc_name}")
+                        telegram_send_to(chat_id, f"Start: {svc_name} -> {new_status}")
+                    else:
+                        avail = ", ".join(ALLOWED_SERVICES.keys())
+                        telegram_send_to(chat_id, f"Unknown service: {svc_name}\nAvailable: {avail}")
+
+                elif base_cmd == "/update":
+                    telegram_send_to(chat_id, "Updating dashboard...")
+                    try:
+                        git_out = run_cmd("cd ~/SolaxyEasyNode && git pull", timeout=30)
+                        # Copy files
+                        run_cmd("cp -r ~/SolaxyEasyNode/dashboard/* ~/dashboard/", timeout=10)
+                        telegram_send_to(chat_id, f"Update done:\n{git_out}\n\nRestarting dashboard...")
+                        run_cmd("sudo systemctl restart solaxy-dashboard.service", timeout=15)
+                    except Exception as e:
+                        telegram_send_to(chat_id, f"Update failed: {e}")
+
+                elif base_cmd in ("/start", "/help"):
                     welcome = (
-                        "👋 Welcome to Solaxy Node Bot!\n\n"
+                        "Solaxy Node Bot\n\n"
                         "Available commands:\n\n"
-                        "/health — Service status & system stats\n"
-                        "/log — Last 20 solaxy-node log lines\n"
-                        "/log celestia — Last 20 celestia log lines\n"
-                        "/log postgresql — Last 20 postgresql log lines\n"
-                        "/help — Show this message"
+                        "/health -- Service status & system stats\n"
+                        "/log -- Last 20 solaxy-node log lines\n"
+                        "/log celestia -- Celestia log lines\n"
+                        "/log postgresql -- PostgreSQL log lines\n"
+                        "/balance -- TIA & SOLX balance + 24h delta\n"
+                        "/restart <svc> -- Restart a service\n"
+                        "/start <svc> -- Start a service\n"
+                        "/stop <svc> -- Stop a service\n"
+                        "/autorestart -- Toggle auto-restart\n"
+                        "/update -- Pull & update dashboard\n"
+                        "/help -- Show this message"
                     )
                     telegram_send_to(chat_id, welcome)
         except Exception:
@@ -385,7 +712,7 @@ def _block_time_loop():
                         _block_stats["slots_per_sec"] = 0
                         _block_stats["block_time_ms"] = None
 
-            # DA blocks — only update rate when height actually changed
+            # DA blocks -- only update rate when height actually changed
             if da_height is not None:
                 prev_da = _block_stats["last_da"]
                 prev_da_time = _block_stats["last_da_time"]
@@ -434,10 +761,10 @@ def parse_solaxy_logs():
                 info["target_da_height"] = int(m.group(1))
         if len(info) >= 6:
             break
-    # If we have synced height but no target, node is caught up — set target = synced
+    # If we have synced height but no target, node is caught up -- set target = synced
     if "synced_da_height" in info and "target_da_height" not in info:
         info["target_da_height"] = info["synced_da_height"]
-    # When synced, logs no longer contain slot_number — fall back to local RPC
+    # When synced, logs no longer contain slot_number -- fall back to local RPC
     if "slot_number" not in info:
         slot = _rpc_call(LOCAL_RPC, "getSlot")
         if slot is not None:
@@ -813,6 +1140,108 @@ def api_node_identity():
 
 
 # ---------------------------------------------------------------------------
+# Uptime History API
+# ---------------------------------------------------------------------------
+
+@app.route("/api/uptime")
+def api_uptime():
+    hours = int(request.args.get("hours", 24))
+    cutoff = time.time() - hours * 3600
+    services = ["solaxy-node", "celestia-light", "postgresql"]
+    result = {}
+
+    try:
+        conn = sqlite3.connect(UPTIME_DB_PATH)
+        c = conn.cursor()
+        for svc in services:
+            c.execute(
+                "SELECT timestamp, active FROM uptime_log WHERE service = ? AND timestamp > ? ORDER BY timestamp ASC",
+                (svc, cutoff),
+            )
+            rows = c.fetchall()
+            total = len(rows)
+            up = sum(1 for _, a in rows if a)
+            pct = round(up / total * 100, 2) if total > 0 else 100.0
+            timeline = [{"t": r[0], "up": bool(r[1])} for r in rows]
+            result[svc] = {"uptime_pct": pct, "checks": total, "timeline": timeline}
+        conn.close()
+    except Exception:
+        for svc in services:
+            result[svc] = {"uptime_pct": 100.0, "checks": 0, "timeline": []}
+
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# Balance History API
+# ---------------------------------------------------------------------------
+
+@app.route("/api/balance-history")
+def api_balance_history():
+    hours = int(request.args.get("hours", 24))
+    cutoff = time.time() - hours * 3600
+
+    try:
+        conn = sqlite3.connect(UPTIME_DB_PATH)
+        c = conn.cursor()
+        c.execute(
+            "SELECT timestamp, tia_balance, solx_balance FROM balance_log WHERE timestamp > ? ORDER BY timestamp ASC",
+            (cutoff,),
+        )
+        rows = c.fetchall()
+        conn.close()
+
+        entries = [{"t": r[0], "tia": r[1], "solx": r[2]} for r in rows]
+        tia_delta = None
+        solx_delta = None
+        burn_rate = None
+        if len(rows) >= 2:
+            tia_delta = round(rows[-1][1] - rows[0][1], 6)
+            solx_delta = round(rows[-1][2] - rows[0][2], 6)
+            dt_hours = (rows[-1][0] - rows[0][0]) / 3600
+            if dt_hours > 0 and tia_delta < 0:
+                burn_rate = round(abs(tia_delta) / dt_hours * 24, 6)
+
+        return jsonify({
+            "entries": entries,
+            "tia_delta_24h": tia_delta,
+            "solx_delta_24h": solx_delta,
+            "daily_burn_rate": burn_rate,
+        })
+    except Exception:
+        return jsonify({"entries": [], "tia_delta_24h": None, "solx_delta_24h": None, "daily_burn_rate": None})
+
+
+# ---------------------------------------------------------------------------
+# Metrics History API (for Sparklines)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/metrics-history")
+def api_metrics_history():
+    minutes = int(request.args.get("minutes", 60))
+    cutoff = time.time() - minutes * 60
+
+    try:
+        conn = sqlite3.connect(UPTIME_DB_PATH)
+        c = conn.cursor()
+        c.execute(
+            "SELECT timestamp, cpu_percent, memory_percent, da_rate FROM metrics_log WHERE timestamp > ? ORDER BY timestamp ASC",
+            (cutoff,),
+        )
+        rows = c.fetchall()
+        conn.close()
+
+        return jsonify({
+            "timestamps": [r[0] for r in rows],
+            "cpu": [r[1] for r in rows],
+            "memory": [r[2] for r in rows],
+            "da_rate": [r[3] for r in rows],
+        })
+    except Exception:
+        return jsonify({"timestamps": [], "cpu": [], "memory": [], "da_rate": []})
+
+
+# ---------------------------------------------------------------------------
 # Config API
 # ---------------------------------------------------------------------------
 
@@ -966,13 +1395,15 @@ def api_telegram():
         "connected": bool(cfg.get("chat_id")),
         "chat_id": cfg.get("chat_id", ""),
         "enabled": cfg.get("enabled", False),
+        "auto_restart": cfg.get("auto_restart", False),
+        "dashboard_token": cfg.get("dashboard_token", ""),
+        "tia_low_threshold": cfg.get("tia_low_threshold", 0.5),
     })
 
 
 @app.route("/api/telegram/connect", methods=["POST"])
 def api_telegram_connect():
     """Step 1: Generate a unique code and return a deep link for the user."""
-    import secrets
     global _pending_connect_code
     _pending_connect_code = secrets.token_hex(8)
     link = f"https://t.me/{TELEGRAM_BOT_USERNAME}?start={_pending_connect_code}"
@@ -1000,7 +1431,7 @@ def api_telegram_connect_confirm():
 def api_telegram_test():
     import socket
     hostname = socket.gethostname()
-    ok, msg = telegram_send(f"🔔 Test alert from {hostname} — Solaxy Node Dashboard")
+    ok, msg = telegram_send(f"Test alert from {hostname} -- Solaxy Node Dashboard")
     return jsonify({"ok": ok, "message": msg})
 
 
@@ -1012,13 +1443,52 @@ def api_telegram_toggle():
     return jsonify({"ok": True, "enabled": cfg["enabled"]})
 
 
+@app.route("/api/telegram/auto-restart", methods=["POST"])
+def api_telegram_auto_restart():
+    cfg = telegram_load_config()
+    cfg["auto_restart"] = not cfg.get("auto_restart", False)
+    telegram_save_config(cfg)
+    return jsonify({"ok": True, "auto_restart": cfg["auto_restart"]})
+
+
+# ---------------------------------------------------------------------------
+# One-Click Update API
+# ---------------------------------------------------------------------------
+
+@app.route("/api/update", methods=["POST"])
+def api_update():
+    """Git pull in ~/SolaxyEasyNode, copy files to ~/dashboard."""
+    try:
+        git_output = run_cmd("cd ~/SolaxyEasyNode && git pull", timeout=30)
+        copy_output = run_cmd("cp -r ~/SolaxyEasyNode/dashboard/* ~/dashboard/", timeout=10)
+        return jsonify({"ok": True, "git_output": git_output, "copy_output": copy_output})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/update/restart", methods=["POST"])
+def api_update_restart():
+    """Restart the dashboard service."""
+    try:
+        run_cmd("sudo systemctl restart solaxy-dashboard.service", timeout=15)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # Register bot commands in the Telegram menu
 try:
     requests.post(
         f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands",
         json={"commands": [
             {"command": "health", "description": "Service status & system stats"},
-            {"command": "log", "description": "Last 20 solaxy-node log lines"},
+            {"command": "log", "description": "Last 20 log lines (+ celestia/postgresql)"},
+            {"command": "balance", "description": "TIA & SOLX balance + 24h delta"},
+            {"command": "restart", "description": "Restart a service (e.g. /restart solaxy-node)"},
+            {"command": "start", "description": "Start a service"},
+            {"command": "stop", "description": "Stop a service"},
+            {"command": "autorestart", "description": "Toggle auto-restart on/off"},
+            {"command": "update", "description": "Pull & update dashboard"},
             {"command": "help", "description": "Show available commands"},
         ]},
         timeout=10,
@@ -1033,6 +1503,8 @@ _alert_thread = threading.Thread(target=_telegram_alert_loop, daemon=True)
 _alert_thread.start()
 _cmd_thread = threading.Thread(target=_telegram_command_loop, daemon=True)
 _cmd_thread.start()
+_balance_thread = threading.Thread(target=_balance_record_loop, daemon=True)
+_balance_thread.start()
 
 
 if __name__ == "__main__":
