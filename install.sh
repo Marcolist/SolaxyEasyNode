@@ -76,7 +76,7 @@ fi
 log "Installing system dependencies..."
 sudo apt update -qq
 sudo apt install -y build-essential cmake pkg-config libudev-dev \
-    postgresql python3 python3-pip libpq-dev curl tar git jq
+    postgresql python3 python3-pip libpq-dev curl tar git jq pv
 
 # ---------------------------------------------------------------------------
 # Step 2: Download svm-rollup
@@ -86,8 +86,9 @@ mkdir -p "$USER_HOME/svm-rollup"
 cd "$USER_HOME/svm-rollup"
 
 if [[ ! -f "$USER_HOME/svm-rollup/svm-rollup" ]]; then
-    curl -LO https://download.solaxy.io/solaxy/svm-rollup.tar.gz
-    tar xzf svm-rollup.tar.gz
+    curl -L# https://download.solaxy.io/solaxy/svm-rollup.tar.gz -o svm-rollup.tar.gz
+    log "Extracting svm-rollup..."
+    pv svm-rollup.tar.gz | tar xzf - 2>/dev/null || tar xzf svm-rollup.tar.gz
     rm -f svm-rollup.tar.gz
     chmod +x svm-rollup
     log "svm-rollup extracted."
@@ -102,8 +103,7 @@ log "Downloading genesis state..."
 mkdir -p "$USER_HOME/svm-rollup/genesis"
 
 if [[ ! -f "$USER_HOME/svm-rollup/genesis/state_export.svmd" ]]; then
-    curl -LO https://download.solaxy.io/solaxy/state_export.svmd
-    mv state_export.svmd "$USER_HOME/svm-rollup/genesis/"
+    curl -L# https://download.solaxy.io/solaxy/state_export.svmd -o "$USER_HOME/svm-rollup/genesis/state_export.svmd"
     log "Genesis state downloaded."
 else
     warn "Genesis state already exists, skipping download."
@@ -114,9 +114,10 @@ fi
 # ---------------------------------------------------------------------------
 if ! command -v go &>/dev/null; then
     log "Installing Go ${GO_VERSION}..."
-    curl -LO "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
+    curl -L# "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o "go${GO_VERSION}.linux-amd64.tar.gz"
     sudo rm -rf /usr/local/go
-    sudo tar -C /usr/local -xzf "go${GO_VERSION}.linux-amd64.tar.gz"
+    log "Extracting Go..."
+    pv "go${GO_VERSION}.linux-amd64.tar.gz" | sudo tar -C /usr/local -xzf - 2>/dev/null || sudo tar -C /usr/local -xzf "go${GO_VERSION}.linux-amd64.tar.gz"
     rm -f "go${GO_VERSION}.linux-amd64.tar.gz"
     export PATH=$PATH:/usr/local/go/bin:$USER_HOME/go/bin
     # Persist PATH
