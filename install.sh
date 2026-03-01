@@ -447,6 +447,23 @@ install_service "solaxy-dashboard.service"
 
 sudo systemctl daemon-reload
 sudo systemctl enable celestia-light solaxy-node solaxy-dashboard
+
+# ---------------------------------------------------------------------------
+# Step 14: Open firewall for dashboard
+# ---------------------------------------------------------------------------
+if command -v ufw &>/dev/null; then
+    log "Opening firewall port 5555 (dashboard)..."
+    sudo ufw allow 5555/tcp comment "Solaxy Dashboard" >/dev/null 2>&1
+    log "Firewall port 5555 opened."
+elif command -v firewall-cmd &>/dev/null; then
+    log "Opening firewall port 5555 (dashboard)..."
+    sudo firewall-cmd --permanent --add-port=5555/tcp >/dev/null 2>&1
+    sudo firewall-cmd --reload >/dev/null 2>&1
+    log "Firewall port 5555 opened."
+else
+    warn "No firewall tool (ufw/firewalld) found. Ensure port 5555 is accessible."
+fi
+
 sudo systemctl start celestia-light
 log "Waiting for Celestia to initialize..."
 sleep 15
@@ -454,7 +471,7 @@ sudo systemctl start solaxy-node
 sudo systemctl start solaxy-dashboard
 
 # ---------------------------------------------------------------------------
-# Step 14: Print summary
+# Step 15: Print summary
 # ---------------------------------------------------------------------------
 echo ""
 echo -e "${CYAN}============================================================${NC}"
