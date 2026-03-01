@@ -88,7 +88,7 @@ cd "$USER_HOME/svm-rollup"
 if [[ ! -f "$USER_HOME/svm-rollup/svm-rollup" ]]; then
     curl -L# https://download.solaxy.io/solaxy/svm-rollup.tar.gz -o svm-rollup.tar.gz
     log "Extracting svm-rollup..."
-    pv svm-rollup.tar.gz | tar xzf - 2>/dev/null || tar xzf svm-rollup.tar.gz
+    pv svm-rollup.tar.gz | tar xzf - --strip-components=1 2>/dev/null || tar xzf svm-rollup.tar.gz --strip-components=1
     rm -f svm-rollup.tar.gz
     chmod +x svm-rollup
     log "svm-rollup extracted."
