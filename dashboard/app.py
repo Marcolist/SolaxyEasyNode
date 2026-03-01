@@ -102,6 +102,11 @@ def parse_solaxy_logs():
                 info["waiting_for_celestia"] = True
                 info["needed_height"] = int(m.group(1))
                 info["celestia_tail"] = int(m.group(2))
+        if "fork_point_height=" in line and "synced_da_height" not in info:
+            m = re.search(r"fork_point_height=(\d+)", line)
+            if m:
+                info["synced_da_height"] = int(m.group(1))
+                info["target_da_height"] = int(m.group(1))
         if len(info) >= 6:
             break
     # If we have synced height but no target, node is caught up — set target = synced
