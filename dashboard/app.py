@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Solaxy Node Monitoring Dashboard"""
 
+import hashlib
 import json
 import os
 import re
@@ -103,76 +104,184 @@ def _can_auto_restart(service):
 
 
 # ---------------------------------------------------------------------------
-# Dashboard Token / Password Protection
+# Dashboard Password Protection
 # ---------------------------------------------------------------------------
 
-def _ensure_dashboard_token():
-    """Generate a dashboard token on first start, save to telegram.json."""
+def _hash_password(password):
+    """Hash a password with SHA-256 + salt."""
+    salt = secrets.token_hex(16)
+    h = hashlib.sha256((salt + password).encode()).hexdigest()
+    return f"{salt}:{h}"
+
+
+def _verify_password(password, stored):
+    """Verify a password against a stored salt:hash."""
+    if not stored or ":" not in stored:
+        return False
+    salt, h = stored.split(":", 1)
+    return hashlib.sha256((salt + password).encode()).hexdigest() == h
+
+
+def _has_password():
+    """Check if a dashboard password has been set."""
     cfg = telegram_load_config()
-    if not cfg.get("dashboard_token"):
-        cfg["dashboard_token"] = secrets.token_hex(24)
-        telegram_save_config(cfg)
-    return cfg["dashboard_token"]
+    return bool(cfg.get("dashboard_password"))
 
 
-# Token initialized after telegram_load_config/telegram_save_config are defined (see below)
+# Active session tokens (in-memory, survive until restart)
+_sessions = set()
 
-# Login page HTML (inline, no extra template)
-_LOGIN_PAGE = """<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Solaxy Dashboard - Login</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
+_LOGIN_STYLE = """*{margin:0;padding:0;box-sizing:border-box}
 body{background:#0d1117;color:#c9d1d9;font-family:'SF Mono','Cascadia Code','Fira Code',monospace;
 display:flex;justify-content:center;align-items:center;min-height:100vh}
 .login-box{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;width:360px;text-align:center}
 .login-box h1{font-size:18px;color:#f0f6fc;margin-bottom:6px}
 .login-box h2{font-size:13px;color:#8b949e;font-weight:normal;margin-bottom:24px}
 .login-box input{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;
-padding:10px 12px;font-family:inherit;font-size:13px;margin-bottom:16px}
+padding:10px 12px;font-family:inherit;font-size:13px;margin-bottom:12px}
 .login-box input:focus{border-color:#58a6ff;outline:none}
 .login-box button{width:100%;background:#238636;color:#fff;border:none;border-radius:6px;padding:10px;
 font-family:inherit;font-size:13px;font-weight:600;cursor:pointer}
 .login-box button:hover{background:#2ea043}
-.login-error{color:#f85149;font-size:12px;margin-top:12px;min-height:16px}
-</style></head><body>
+.login-msg{font-size:12px;margin-top:12px;min-height:16px}
+.login-msg.err{color:#f85149}
+.login-msg.ok{color:#3fb950}"""
+
+_SETUP_PAGE = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Solaxy Dashboard - Setup</title>
+<style>{_LOGIN_STYLE}</style></head><body>
 <div class="login-box">
 <h1>Solaxy Node Dashboard</h1>
-<h2>Enter dashboard token to continue</h2>
-<form onsubmit="doLogin(event)">
-<input type="password" id="tokenInput" placeholder="Dashboard Token" autofocus>
-<button type="submit">Login</button>
+<h2>Set a password to secure your dashboard</h2>
+<form onsubmit="doSetup(event)">
+<input type="password" id="pw1" placeholder="Password" autofocus>
+<input type="password" id="pw2" placeholder="Confirm password">
+<button type="submit">Set Password</button>
 </form>
-<div class="login-error" id="loginErr"></div>
+<div class="login-msg" id="msg"></div>
 </div>
 <script>
-function doLogin(e){
+async function doSetup(e){{
   e.preventDefault();
-  const token=document.getElementById('tokenInput').value.trim();
-  if(!token){document.getElementById('loginErr').textContent='Please enter a token';return;}
-  document.cookie='dashboard_token='+token+';path=/;max-age=2592000;SameSite=Lax';
-  window.location.reload();
-}
+  const pw1=document.getElementById('pw1').value;
+  const pw2=document.getElementById('pw2').value;
+  const msg=document.getElementById('msg');
+  if(!pw1){{msg.textContent='Please enter a password';msg.className='login-msg err';return;}}
+  if(pw1.length<4){{msg.textContent='Password must be at least 4 characters';msg.className='login-msg err';return;}}
+  if(pw1!==pw2){{msg.textContent='Passwords do not match';msg.className='login-msg err';return;}}
+  try{{
+    const r=await fetch('/api/set-password',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{password:pw1}})}});
+    const d=await r.json();
+    if(d.ok){{document.cookie='dashboard_session='+d.session+';path=/;max-age=2592000;SameSite=Lax';window.location.reload();}}
+    else{{msg.textContent=d.error||'Failed';msg.className='login-msg err';}}
+  }}catch(ex){{msg.textContent='Error: '+ex.message;msg.className='login-msg err';}}
+}}
+</script></body></html>"""
+
+_LOGIN_PAGE = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Solaxy Dashboard - Login</title>
+<style>{_LOGIN_STYLE}</style></head><body>
+<div class="login-box">
+<h1>Solaxy Node Dashboard</h1>
+<h2>Enter your password</h2>
+<form onsubmit="doLogin(event)">
+<input type="password" id="pw" placeholder="Password" autofocus>
+<button type="submit">Login</button>
+</form>
+<div class="login-msg" id="msg"></div>
+</div>
+<script>
+async function doLogin(e){{
+  e.preventDefault();
+  const pw=document.getElementById('pw').value;
+  const msg=document.getElementById('msg');
+  if(!pw){{msg.textContent='Please enter your password';msg.className='login-msg err';return;}}
+  try{{
+    const r=await fetch('/api/login',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{password:pw}})}});
+    const d=await r.json();
+    if(d.ok){{document.cookie='dashboard_session='+d.session+';path=/;max-age=2592000;SameSite=Lax';window.location.reload();}}
+    else{{msg.textContent=d.error||'Wrong password';msg.className='login-msg err';}}
+  }}catch(ex){{msg.textContent='Error: '+ex.message;msg.className='login-msg err';}}
+}}
 </script></body></html>"""
 
 
 @app.before_request
 def _check_auth():
-    """Check dashboard token on every request."""
+    """Check dashboard password on every request."""
     # Allow static files without auth
     if request.path.startswith("/static/"):
         return None
-    token = (
-        request.cookies.get("dashboard_token")
-        or request.args.get("token")
-        or (request.headers.get("Authorization", "").replace("Bearer ", "") if request.headers.get("Authorization") else None)
-    )
-    if token == _dashboard_token:
+    # Allow login/setup API without auth
+    if request.path in ("/api/login", "/api/set-password"):
+        return None
+    # No password set yet — show setup page (allow everything for first visit)
+    if not _has_password():
+        if request.path.startswith("/api/"):
+            return None
+        return make_response(_SETUP_PAGE, 200)
+    # Check session cookie
+    session_token = request.cookies.get("dashboard_session")
+    if session_token and session_token in _sessions:
         return None
     # Not authenticated
     if request.path.startswith("/api/"):
         return jsonify({"error": "unauthorized"}), 401
     return make_response(_LOGIN_PAGE, 401)
+
+
+@app.route("/api/set-password", methods=["POST"])
+def api_set_password():
+    """Set the dashboard password (first-time setup only)."""
+    if _has_password():
+        return jsonify({"ok": False, "error": "Password already set. Use change-password."}), 400
+    data = request.get_json()
+    pw = (data or {}).get("password", "")
+    if len(pw) < 4:
+        return jsonify({"ok": False, "error": "Password must be at least 4 characters"}), 400
+    cfg = telegram_load_config()
+    cfg["dashboard_password"] = _hash_password(pw)
+    cfg.pop("dashboard_token", None)  # remove old token field if present
+    telegram_save_config(cfg)
+    # Create session
+    session_token = secrets.token_hex(32)
+    _sessions.add(session_token)
+    return jsonify({"ok": True, "session": session_token})
+
+
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    """Log in with the dashboard password."""
+    data = request.get_json()
+    pw = (data or {}).get("password", "")
+    cfg = telegram_load_config()
+    if not _verify_password(pw, cfg.get("dashboard_password", "")):
+        return jsonify({"ok": False, "error": "Wrong password"}), 401
+    session_token = secrets.token_hex(32)
+    _sessions.add(session_token)
+    return jsonify({"ok": True, "session": session_token})
+
+
+@app.route("/api/change-password", methods=["POST"])
+def api_change_password():
+    """Change the dashboard password (requires current password)."""
+    data = request.get_json()
+    old_pw = (data or {}).get("old_password", "")
+    new_pw = (data or {}).get("new_password", "")
+    cfg = telegram_load_config()
+    if not _verify_password(old_pw, cfg.get("dashboard_password", "")):
+        return jsonify({"ok": False, "error": "Current password is wrong"}), 401
+    if len(new_pw) < 4:
+        return jsonify({"ok": False, "error": "New password must be at least 4 characters"}), 400
+    cfg["dashboard_password"] = _hash_password(new_pw)
+    telegram_save_config(cfg)
+    # Invalidate all sessions, create new one
+    _sessions.clear()
+    session_token = secrets.token_hex(32)
+    _sessions.add(session_token)
+    return jsonify({"ok": True, "session": session_token})
 
 
 def telegram_load_config():
@@ -188,9 +297,6 @@ def telegram_save_config(cfg):
     """Save Telegram config to disk."""
     with open(TELEGRAM_CONFIG_PATH, "w") as f:
         json.dump(cfg, f)
-
-
-_dashboard_token = _ensure_dashboard_token()
 
 
 def telegram_send_to(chat_id, text, parse_mode=None):
@@ -1396,7 +1502,6 @@ def api_telegram():
         "chat_id": cfg.get("chat_id", ""),
         "enabled": cfg.get("enabled", False),
         "auto_restart": cfg.get("auto_restart", False),
-        "dashboard_token": cfg.get("dashboard_token", ""),
         "tia_low_threshold": cfg.get("tia_low_threshold", 0.5),
     })
 

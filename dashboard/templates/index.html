@@ -127,10 +127,11 @@ canvas.sparkline{vertical-align:middle}
 /* Update section */
 .update-output{background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:8px;font-size:11px;color:#8b949e;max-height:120px;overflow-y:auto;margin-top:8px;white-space:pre-wrap;display:none}
 
-/* Token display */
-.token-display{display:flex;align-items:center;gap:8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:6px 10px;font-size:11px;color:#c9d1d9;word-break:break-all}
-.token-display .copy-btn{background:#21262d;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:3px 8px;font-size:10px;cursor:pointer;white-space:nowrap;font-family:inherit}
-.token-display .copy-btn:hover{background:#30363d}
+/* Password change */
+.pw-form{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.pw-form input{background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#c9d1d9;padding:6px 8px;font-family:inherit;font-size:12px;width:160px}
+.pw-form input:focus{border-color:#58a6ff;outline:none}
+.pw-msg{font-size:11px;margin-top:6px;min-height:16px}
 
 @media(max-width:768px){
   .grid{grid-template-columns:1fr}
@@ -416,12 +417,13 @@ canvas.sparkline{vertical-align:middle}
 </div>
 <div class="settings-panel" id="settingsPanel">
 
-  <h4>Dashboard Token</h4>
-  <div style="margin-bottom:8px;color:#8b949e;font-size:11px">Use this token to log in to the dashboard. Keep it safe.</div>
-  <div class="token-display">
-    <span id="dashToken" style="flex:1">-</span>
-    <button class="copy-btn" onclick="copyToken()">Copy</button>
+  <h4>Change Password</h4>
+  <div class="pw-form">
+    <input type="password" id="pwOld" placeholder="Current password">
+    <input type="password" id="pwNew" placeholder="New password">
+    <button class="btn btn-primary btn-sm" onclick="changePassword()">Change</button>
   </div>
+  <div class="pw-msg" id="pwMsg"></div>
 
   <h4>Dashboard Update</h4>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1155,10 +1157,6 @@ function updateTelegramUI(data) {
     autoRestart.style.color = '#8b949e';
   }
 
-  // Dashboard token
-  if (data.dashboard_token) {
-    document.getElementById('dashToken').textContent = data.dashboard_token;
-  }
 }
 
 function tgShowStatus(msg, isError) {
@@ -1308,13 +1306,27 @@ async function restartDashboard() {
   }
 }
 
-function copyToken() {
-  const token = document.getElementById('dashToken').textContent;
-  navigator.clipboard.writeText(token).then(() => {
-    const btn = document.querySelector('.copy-btn');
-    btn.textContent = 'Copied!';
-    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
-  });
+async function changePassword() {
+  const oldPw = document.getElementById('pwOld').value;
+  const newPw = document.getElementById('pwNew').value;
+  const msg = document.getElementById('pwMsg');
+  if (!oldPw || !newPw) { msg.textContent = 'Fill in both fields'; msg.style.color = '#f85149'; return; }
+  if (newPw.length < 4) { msg.textContent = 'Min. 4 characters'; msg.style.color = '#f85149'; return; }
+  try {
+    const r = await fetch('/api/change-password', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({old_password: oldPw, new_password: newPw})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      document.cookie = 'dashboard_session=' + d.session + ';path=/;max-age=2592000;SameSite=Lax';
+      msg.textContent = 'Password changed'; msg.style.color = '#3fb950';
+      document.getElementById('pwOld').value = '';
+      document.getElementById('pwNew').value = '';
+    } else {
+      msg.textContent = d.error || 'Failed'; msg.style.color = '#f85149';
+    }
+  } catch (e) { msg.textContent = 'Error: ' + e.message; msg.style.color = '#f85149'; }
 }
 
 // Initial load
