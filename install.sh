@@ -16,7 +16,7 @@ CELESTIA_REPO="https://github.com/celestiaorg/celestia-node.git"
 CELESTIA_VERSION="v0.28.4"
 GO_VERSION="1.25.1"
 
-CELESTIA_PRUNING_WINDOW="720h0m0s"
+CELESTIA_PRUNING_WINDOW=""  # calculated dynamically after genesis DA height is known
 
 USER_NAME="$(whoami)"
 USER_HOME="$HOME"
@@ -120,6 +120,21 @@ if [[ -f "$CHAIN_STATE_FILE" ]]; then
 fi
 
 if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
+    # Calculate pruning window: (current_head - genesis_height) * 11s per block + 48h buffer
+    CELESTIA_CURRENT_HEAD=$(curl -s "https://${CELESTIA_CORE_IP}/header" \
+        | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['header']['height'])" 2>/dev/null || true)
+    if [[ -n "$CELESTIA_CURRENT_HEAD" && "$CELESTIA_CURRENT_HEAD" -gt 0 ]] 2>/dev/null; then
+        BLOCK_DIFF=$((CELESTIA_CURRENT_HEAD - GENESIS_DA_HEIGHT))
+        PRUNING_HOURS=$(( (BLOCK_DIFF * 11 / 3600) + 48 ))
+        # Minimum 720h, no maximum
+        if [[ $PRUNING_HOURS -lt 720 ]]; then PRUNING_HOURS=720; fi
+        CELESTIA_PRUNING_WINDOW="${PRUNING_HOURS}h0m0s"
+        log "Celestia pruning window: ${PRUNING_HOURS}h (${BLOCK_DIFF} blocks since genesis + 48h buffer)"
+    else
+        CELESTIA_PRUNING_WINDOW="720h0m0s"
+        warn "Could not fetch Celestia head height, using default pruning window (720h)"
+    fi
+
     # Start syncing a few thousand blocks before genesis to have a margin
     CELESTIA_SYNC_FROM_HEIGHT=$((GENESIS_DA_HEIGHT - 26000))
     log "Genesis DA height: $GENESIS_DA_HEIGHT — Celestia will sync from $CELESTIA_SYNC_FROM_HEIGHT"
@@ -134,6 +149,7 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
     fi
 else
     warn "Could not read genesis_da_height from chain_state_zk.json."
+    CELESTIA_PRUNING_WINDOW="720h0m0s"
     CELESTIA_SYNC_FROM_HEIGHT=""
     CELESTIA_SYNC_FROM_HASH=""
 fi
