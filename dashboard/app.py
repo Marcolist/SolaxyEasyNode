@@ -96,7 +96,13 @@ def parse_solaxy_logs():
             m = re.search(r"time=(\d+(?:\.\d+)?)ms", line)
             if m:
                 info["block_time_ms"] = float(m.group(1))
-        if len(info) >= 4:
+        if "is below Tail" in line and "waiting_for_celestia" not in info:
+            m = re.search(r"requested header \((\d+)\) is below Tail \((\d+)\)", line)
+            if m:
+                info["waiting_for_celestia"] = True
+                info["needed_height"] = int(m.group(1))
+                info["celestia_tail"] = int(m.group(2))
+        if len(info) >= 6:
             break
     # If we have synced height but no target, node is caught up — set target = synced
     if "synced_da_height" in info and "target_da_height" not in info:

@@ -146,7 +146,7 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
       <div class="stat"><span class="stat-label">CPU</span><span class="stat-value" id="solCpu">-</span></div>
     </div>
     <div style="margin-top:10px">
-      <div class="stat-label">Sync Progress (DA Height)</div>
+      <div class="stat-label" id="solSyncLabel">Sync Progress (DA Height)</div>
       <div class="progress-bar"><div class="progress-fill" id="solSyncBar" style="width:0%">0%</div></div>
       <div style="display:flex;justify-content:space-between;font-size:11px;color:#8b949e">
         <span id="solSyncFrom">-</span>
@@ -443,22 +443,38 @@ function num(n) {
   return Number(n).toLocaleString();
 }
 
-function setBadge(id, active) {
+function setBadge(id, active, text, cls) {
   const el = document.getElementById(id);
-  if (active) { el.textContent = 'RUNNING'; el.className = 'badge badge-ok'; }
+  if (text) { el.textContent = text; el.className = 'badge ' + (cls || 'badge-ok'); }
+  else if (active) { el.textContent = 'RUNNING'; el.className = 'badge badge-ok'; }
   else { el.textContent = 'DOWN'; el.className = 'badge badge-err'; }
 }
 
 function updateStats(data) {
   // Solaxy
   const sol = data.solaxy;
-  setBadge('solaxyBadge', sol.service.active);
+  if (sol.sync.waiting_for_celestia && sol.service.active) {
+    setBadge('solaxyBadge', true, 'WAITING', 'badge-warn');
+  } else {
+    setBadge('solaxyBadge', sol.service.active);
+  }
   document.getElementById('solSlot').textContent = num(sol.sync.slot_number);
   document.getElementById('solBlockTime').textContent = sol.sync.block_time_ms != null ? sol.sync.block_time_ms + ' ms' : '-';
   document.getElementById('solMem').textContent = sol.service.memory_mb != null ? sol.service.memory_mb + ' MB' : '-';
   document.getElementById('solCpu').textContent = sol.service.cpu_seconds != null ? sol.service.cpu_seconds + 's' : '-';
 
-  if (sol.sync.synced_da_height) {
+  if (sol.sync.waiting_for_celestia) {
+    document.getElementById('solSyncLabel').textContent = 'Waiting for Celestia History';
+    const needed = sol.sync.needed_height;
+    const tail = sol.sync.celestia_tail;
+    const remaining = tail - needed;
+    document.getElementById('solSyncBar').style.width = '0%';
+    document.getElementById('solSyncBar').textContent = 'Waiting';
+    document.getElementById('solSyncBar').style.background = 'linear-gradient(90deg,#9e6a03,#d29922)';
+    document.getElementById('solSyncFrom').textContent = 'Need DA ' + num(needed);
+    document.getElementById('solSyncTo').textContent = 'Tail ' + num(tail) + ' (' + num(remaining) + ' behind)';
+  } else if (sol.sync.synced_da_height) {
+    document.getElementById('solSyncLabel').textContent = 'Sync Progress (DA Height)';
     const synced = sol.sync.synced_da_height;
     const target = sol.sync.target_da_height || synced;
     const genesis = 9910000;
@@ -466,7 +482,7 @@ function updateStats(data) {
     const isSynced = (target - synced) < 5;
     document.getElementById('solSyncBar').style.width = pct + '%';
     document.getElementById('solSyncBar').textContent = isSynced ? 'Synced' : pct + '%';
-    if (isSynced) document.getElementById('solSyncBar').style.background = 'linear-gradient(90deg,#238636,#3fb950)';
+    document.getElementById('solSyncBar').style.background = isSynced ? 'linear-gradient(90deg,#238636,#3fb950)' : 'linear-gradient(90deg,#238636,#2ea043)';
     document.getElementById('solSyncFrom').textContent = isSynced ? 'DA ' + num(synced) : num(synced);
     document.getElementById('solSyncTo').textContent = isSynced ? 'Live' : num(target);
   }
