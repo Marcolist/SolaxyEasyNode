@@ -222,35 +222,7 @@ sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'secret';" 2>/dev/null ||
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='svm'" | grep -q 1 || \
     sudo -u postgres createdb svm
 
-# Create tables
-sudo -u postgres psql -d svm -c "
-CREATE TABLE IF NOT EXISTS blocks (
-    slot BIGINT PRIMARY KEY,
-    hash TEXT,
-    parent_slot BIGINT,
-    block_time BIGINT,
-    block_height BIGINT,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS transactions (
-    signature TEXT PRIMARY KEY,
-    slot BIGINT,
-    err BOOLEAN DEFAULT FALSE,
-    fee BIGINT,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS accounts (
-    pubkey TEXT PRIMARY KEY,
-    lamports BIGINT DEFAULT 0,
-    owner TEXT,
-    executable BOOLEAN DEFAULT FALSE,
-    updated_at TIMESTAMP DEFAULT NOW()
-);
-" 2>/dev/null || true
-
-log "PostgreSQL configured (database: svm)."
+log "PostgreSQL configured (database: svm). Tables will be created by svm-rollup migrations."
 
 # ---------------------------------------------------------------------------
 # Step 9: Generate config.toml
