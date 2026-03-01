@@ -16,6 +16,11 @@ CELESTIA_REPO="https://github.com/celestiaorg/celestia-node.git"
 CELESTIA_VERSION="v0.28.4"
 GO_VERSION="1.25.1"
 
+# Celestia sync start point — must be at or before the earliest DA height the rollup needs
+CELESTIA_SYNC_FROM_HEIGHT="9884000"
+CELESTIA_SYNC_FROM_HASH="258D60B014C9E46361FB8A5D2A8F38C3D1479D0D56BB61AF8126BDE10E1F9677"
+CELESTIA_PRUNING_WINDOW="720h0m0s"
+
 USER_NAME="$(whoami)"
 USER_HOME="$HOME"
 
@@ -161,6 +166,14 @@ if [[ ! -d "$CELESTIA_STORE/keys" ]]; then
     log "Celestia light node initialized."
 else
     warn "Celestia light node already initialized."
+fi
+
+# Configure Celestia to sync from rollup genesis DA height with extended pruning window
+if [[ -f "$CELESTIA_STORE/config.toml" ]]; then
+    log "Configuring Celestia sync start and pruning window..."
+    sed -i "s|SyncFromHeight = .*|SyncFromHeight = ${CELESTIA_SYNC_FROM_HEIGHT}|" "$CELESTIA_STORE/config.toml"
+    sed -i "s|SyncFromHash = .*|SyncFromHash = \"${CELESTIA_SYNC_FROM_HASH}\"|" "$CELESTIA_STORE/config.toml"
+    sed -i "s|PruningWindow = .*|PruningWindow = \"${CELESTIA_PRUNING_WINDOW}\"|" "$CELESTIA_STORE/config.toml"
 fi
 
 # Extract auth token
