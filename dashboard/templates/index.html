@@ -142,6 +142,7 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
     <div class="stat-grid">
       <div class="stat"><span class="stat-label">Slot</span><span class="stat-value" id="solSlot">-</span></div>
       <div class="stat"><span class="stat-label">Block Time</span><span class="stat-value" id="solBlockTime">-</span></div>
+      <div class="stat"><span class="stat-label">DA Blocks/sec</span><span class="stat-value" id="solDaRate">-</span></div>
       <div class="stat"><span class="stat-label">Memory</span><span class="stat-value" id="solMem">-</span></div>
       <div class="stat"><span class="stat-label">CPU</span><span class="stat-value" id="solCpu">-</span></div>
     </div>
@@ -490,7 +491,20 @@ function updateStats(data) {
     setBadge('solaxyBadge', sol.service.active);
   }
   document.getElementById('solSlot').textContent = num(sol.sync.slot_number);
-  document.getElementById('solBlockTime').textContent = sol.sync.block_time_ms != null ? sol.sync.block_time_ms + ' ms' : '-';
+  if (sol.sync.block_time_ms != null) {
+    document.getElementById('solBlockTime').textContent = sol.sync.block_time_ms + ' ms';
+  } else if (sol.sync.slots_per_sec === 0) {
+    document.getElementById('solBlockTime').textContent = 'idle';
+    document.getElementById('solBlockTime').style.color = '#8b949e';
+  } else {
+    document.getElementById('solBlockTime').textContent = '-';
+  }
+  if (sol.sync.da_blocks_per_sec != null) {
+    const rate = sol.sync.da_blocks_per_sec;
+    const el = document.getElementById('solDaRate');
+    el.textContent = rate > 0 ? rate + '/s' : 'idle';
+    el.style.color = rate > 0 ? '#3fb950' : '#8b949e';
+  }
   document.getElementById('solMem').textContent = sol.service.memory_mb != null ? sol.service.memory_mb + ' MB' : '-';
   document.getElementById('solCpu').textContent = sol.service.cpu_seconds != null ? sol.service.cpu_seconds + 's' : '-';
 

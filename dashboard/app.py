@@ -329,6 +329,76 @@ def systemd_status(service):
     return info
 
 
+def _rpc_call(url, method, params=None, timeout=5):
+    """Make a JSON-RPC call."""
+    payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or []}
+    try:
+        r = requests.post(url, json=payload, timeout=timeout)
+        data = r.json()
+        return data.get("result")
+    except Exception:
+        return None
+
+
+LOCAL_RPC = "http://127.0.0.1:8080"
+
+# Block / DA processing rate measurement
+_block_stats = {
+    "last_slot": None, "last_slot_time": None,
+    "block_time_ms": None, "slots_per_sec": None,
+    "last_da": None, "last_da_time": None,
+    "da_blocks_per_sec": None,
+}
+_block_stats_lock = threading.Lock()
+
+
+def _block_time_loop():
+    """Background thread: measure slot + DA block processing rates."""
+    while True:
+        time.sleep(10)
+        now = time.time()
+
+        # Measure SVM slot rate via RPC
+        slot = _rpc_call(LOCAL_RPC, "getSlot")
+
+        # Measure DA height rate from latest journal line
+        da_line = run_cmd(
+            "journalctl -u solaxy-node.service -n 20 --no-pager 2>/dev/null"
+            " | grep -oP 'fork_point_height=\\K\\d+' | tail -1"
+        )
+        da_height = int(da_line) if da_line and da_line.isdigit() else None
+
+        with _block_stats_lock:
+            # SVM slots
+            if slot is not None:
+                prev_slot = _block_stats["last_slot"]
+                prev_time = _block_stats["last_slot_time"]
+                _block_stats["last_slot"] = slot
+                _block_stats["last_slot_time"] = now
+                if prev_slot is not None and prev_time is not None:
+                    dt = now - prev_time
+                    ds = slot - prev_slot
+                    if dt > 0 and ds > 0:
+                        _block_stats["slots_per_sec"] = round(ds / dt, 1)
+                        _block_stats["block_time_ms"] = round(dt / ds * 1000, 1)
+                    elif ds == 0:
+                        _block_stats["slots_per_sec"] = 0
+                        _block_stats["block_time_ms"] = None
+
+            # DA blocks — only update rate when height actually changed
+            if da_height is not None:
+                prev_da = _block_stats["last_da"]
+                prev_da_time = _block_stats["last_da_time"]
+                if prev_da is None or da_height != prev_da:
+                    _block_stats["last_da"] = da_height
+                    _block_stats["last_da_time"] = now
+                    if prev_da is not None and prev_da_time is not None and da_height > prev_da:
+                        dt = now - prev_da_time
+                        dd = da_height - prev_da
+                        if dt > 0:
+                            _block_stats["da_blocks_per_sec"] = round(dd / dt, 2)
+
+
 def parse_solaxy_logs():
     """Parse recent solaxy logs for sync progress and slot info."""
     lines = run_cmd("journalctl -u solaxy-node.service -n 500 --no-pager 2>/dev/null")
@@ -367,6 +437,19 @@ def parse_solaxy_logs():
     # If we have synced height but no target, node is caught up — set target = synced
     if "synced_da_height" in info and "target_da_height" not in info:
         info["target_da_height"] = info["synced_da_height"]
+    # When synced, logs no longer contain slot_number — fall back to local RPC
+    if "slot_number" not in info:
+        slot = _rpc_call(LOCAL_RPC, "getSlot")
+        if slot is not None:
+            info["slot_number"] = slot
+    # Fall back to measured rates from background thread
+    with _block_stats_lock:
+        if "block_time_ms" not in info and _block_stats["block_time_ms"] is not None:
+            info["block_time_ms"] = _block_stats["block_time_ms"]
+        if _block_stats["slots_per_sec"] is not None:
+            info["slots_per_sec"] = _block_stats["slots_per_sec"]
+        if _block_stats["da_blocks_per_sec"] is not None:
+            info["da_blocks_per_sec"] = _block_stats["da_blocks_per_sec"]
     return info
 
 
@@ -446,18 +529,6 @@ def prometheus_stats():
         return {}
 
 
-def _rpc_call(url, method, params=None, timeout=5):
-    """Make a JSON-RPC call."""
-    payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or []}
-    try:
-        r = requests.post(url, json=payload, timeout=timeout)
-        data = r.json()
-        return data.get("result")
-    except Exception:
-        return None
-
-
-LOCAL_RPC = "http://127.0.0.1:8080"
 PUBLIC_RPC = "https://mainnet.rpc.solaxy.io"
 SOLX_WALLET_PATH = os.path.expanduser("~/svm-rollup/node-wallet.json")
 
@@ -955,7 +1026,9 @@ try:
 except Exception:
     pass
 
-# Start Telegram background threads
+# Start background threads
+_block_time_thread = threading.Thread(target=_block_time_loop, daemon=True)
+_block_time_thread.start()
 _alert_thread = threading.Thread(target=_telegram_alert_loop, daemon=True)
 _alert_thread.start()
 _cmd_thread = threading.Thread(target=_telegram_command_loop, daemon=True)
