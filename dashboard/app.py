@@ -27,6 +27,16 @@ _cache_lock = threading.Lock()
 
 CELESTIA_STORE = os.path.expanduser("~/.celestia-light/")
 CONFIG_PATH = os.path.expanduser("~/svm-rollup/config.toml")
+GENESIS_CHAIN_STATE = os.path.expanduser("~/svm-rollup/genesis/chain_state_zk.json")
+
+
+def get_genesis_da_height():
+    """Read genesis_da_height from chain_state_zk.json."""
+    try:
+        with open(GENESIS_CHAIN_STATE) as f:
+            return json.load(f).get("genesis_da_height", 0)
+    except Exception:
+        return 0
 
 
 def cached(key, ttl=15):
@@ -360,6 +370,7 @@ def api_stats():
     pg_svc = systemd_status("postgresql.service")
 
     return jsonify({
+        "genesis_da_height": get_genesis_da_height(),
         "solaxy": {
             "service": solaxy_svc,
             "sync": solaxy_sync,

@@ -477,8 +477,8 @@ function updateStats(data) {
     document.getElementById('solSyncLabel').textContent = 'Sync Progress (DA Height)';
     const synced = sol.sync.synced_da_height;
     const target = sol.sync.target_da_height || synced;
-    const genesis = 9910000;
-    const pct = target > genesis ? Math.min(100, ((synced - genesis) / (target - genesis) * 100)).toFixed(1) : '100.0';
+    const genesis = data.genesis_da_height || 9910000;
+    const pct = target > genesis ? Math.min(100, Math.max(0, ((synced - genesis) / (target - genesis) * 100))).toFixed(1) : '100.0';
     const isSynced = (target - synced) < 5;
     document.getElementById('solSyncBar').style.width = pct + '%';
     document.getElementById('solSyncBar').textContent = isSynced ? 'Synced' : pct + '%';
