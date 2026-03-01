@@ -42,7 +42,9 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
 .log-line.info{color:#8b949e}
 .log-line.debug{color:#484f58}
 
-.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:8px}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px}
+.header-left{display:flex;align-items:center;gap:12px}
+.header-logo{height:48px;width:auto}
 .header-right{text-align:right;color:#8b949e;font-size:12px}
 
 .sys-bar{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;padding:10px 14px;background:#161b22;border:1px solid #30363d;border-radius:8px;font-size:12px;color:#8b949e}
@@ -117,9 +119,12 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
 <body>
 
 <div class="header">
-  <div>
-    <h1>Solaxy Node Dashboard</h1>
-    <h2>ML1985DE-NODE</h2>
+  <div class="header-left">
+    <img src="/static/logo.png" alt="Solaxy" class="header-logo">
+    <div>
+      <h1>Solaxy Node Dashboard</h1>
+      <h2>ML1985DE-NODE</h2>
+    </div>
   </div>
   <div class="header-right">
     <div>LAN: <span style="color:#58a6ff" id="lanIp">192.168.179.153</span></div>
