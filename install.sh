@@ -329,10 +329,11 @@ pip3 install --break-system-packages flask psycopg2-binary requests 2>/dev/null 
 # Step 11: Setup Dashboard
 # ---------------------------------------------------------------------------
 log "Setting up dashboard..."
-mkdir -p "$USER_HOME/dashboard/templates"
+mkdir -p "$USER_HOME/dashboard/templates" "$USER_HOME/dashboard/static"
 
 curl -fsSL "${REPO_URL}/dashboard/app.py" -o "$USER_HOME/dashboard/app.py" 2>/dev/null || true
 curl -fsSL "${REPO_URL}/dashboard/templates/index.html" -o "$USER_HOME/dashboard/templates/index.html" 2>/dev/null || true
+curl -fsSL "${REPO_URL}/dashboard/static/logo.png" -o "$USER_HOME/dashboard/static/logo.png" 2>/dev/null || true
 
 if [[ ! -f "$USER_HOME/dashboard/app.py" ]]; then
     warn "Could not download dashboard files. Copy them manually from the repo."
