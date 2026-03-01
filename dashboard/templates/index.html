@@ -240,6 +240,37 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
       <div class="stat"><span class="stat-label">Network TX</span><span class="stat-value" id="sysNetTx">-</span></div>
     </div>
   </div>
+
+  <!-- Telegram Alerts Card -->
+  <div class="card">
+    <div class="card-header">
+      <h3>Telegram Alerts</h3>
+      <span class="badge" id="tgBadge">-</span>
+    </div>
+    <div class="stat-grid">
+      <div class="stat"><span class="stat-label">Chat ID</span><span class="stat-value mono" id="tgChatId">Not connected</span></div>
+      <div class="stat"><span class="stat-label">Alerts</span><span class="stat-value" id="tgEnabled">-</span></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" id="tgConnectBtn" onclick="connectTelegram()">Connect</button>
+      <button class="btn btn-secondary btn-sm" id="tgConfirmBtn" onclick="confirmTelegram()" style="display:none">Confirm</button>
+      <button class="btn btn-secondary btn-sm" id="tgTestBtn" onclick="testTelegram()">Send Test</button>
+      <button class="btn btn-secondary btn-sm" id="tgToggleBtn" onclick="toggleTelegramAlerts()">Toggle Alerts</button>
+    </div>
+    <div id="tgLink" style="margin-top:8px;font-size:11px;display:none">
+      <span style="color:#8b949e">1. Click:</span> <a id="tgLinkA" href="#" target="_blank" style="color:#58a6ff"></a><br>
+      <span style="color:#8b949e">2. Press START in Telegram, then click Confirm above</span>
+    </div>
+    <div id="tgStatus" style="margin-top:8px;font-size:11px;min-height:16px"></div>
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #30363d;font-size:11px;color:#8b949e;line-height:1.8">
+      <div style="color:#c9d1d9;font-weight:600;margin-bottom:4px">Bot Commands</div>
+      <div><span style="color:#58a6ff">/health</span> — Service status &amp; system stats</div>
+      <div><span style="color:#58a6ff">/log</span> — Last 20 solaxy-node log lines</div>
+      <div><span style="color:#58a6ff">/log celestia</span> — Celestia log lines</div>
+      <div><span style="color:#58a6ff">/log postgresql</span> — PostgreSQL log lines</div>
+      <div><span style="color:#58a6ff">/help</span> — Show available commands</div>
+    </div>
+  </div>
 </div>
 
 <!-- Reward Model Info -->
@@ -874,17 +905,141 @@ function setSvcBadge(id, active) {
   else { el.textContent = 'STOPPED'; el.className = 'svc-badge badge-err'; }
 }
 
+// ---------------------------------------------------------------------------
+// Telegram Alerts
+// ---------------------------------------------------------------------------
+
+function updateTelegramUI(data) {
+  const badge = document.getElementById('tgBadge');
+  const chatId = document.getElementById('tgChatId');
+  const enabled = document.getElementById('tgEnabled');
+
+  chatId.textContent = data.chat_id || 'Not connected';
+
+  if (!data.connected) {
+    badge.textContent = 'NOT CONNECTED';
+    badge.className = 'badge badge-err';
+    enabled.textContent = '-';
+  } else if (!data.enabled) {
+    badge.textContent = 'DISABLED';
+    badge.className = 'badge badge-warn';
+    enabled.textContent = 'Off';
+    enabled.style.color = '#d29922';
+  } else {
+    badge.textContent = 'CONNECTED';
+    badge.className = 'badge badge-ok';
+    enabled.textContent = 'On';
+    enabled.style.color = '#3fb950';
+  }
+}
+
+function tgShowStatus(msg, isError) {
+  const el = document.getElementById('tgStatus');
+  el.textContent = msg;
+  el.style.color = isError ? '#f85149' : '#3fb950';
+  setTimeout(() => { el.textContent = ''; }, 5000);
+}
+
+async function fetchTelegram() {
+  try {
+    const r = await fetch('/api/telegram');
+    const data = await r.json();
+    updateTelegramUI(data);
+  } catch (e) {}
+}
+
+async function connectTelegram() {
+  const btn = document.getElementById('tgConnectBtn');
+  btn.disabled = true;
+  btn.textContent = 'Generating link...';
+  try {
+    const r = await fetch('/api/telegram/connect', {method: 'POST'});
+    const data = await r.json();
+    if (data.ok) {
+      const linkEl = document.getElementById('tgLink');
+      const linkA = document.getElementById('tgLinkA');
+      linkA.href = data.link;
+      linkA.textContent = data.link;
+      linkEl.style.display = 'block';
+      document.getElementById('tgConfirmBtn').style.display = '';
+      tgShowStatus('Open the link and press START, then click Confirm.', false);
+    } else {
+      tgShowStatus(data.error || 'Failed', true);
+    }
+  } catch (e) {
+    tgShowStatus('Failed: ' + e.message, true);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Connect';
+}
+
+async function confirmTelegram() {
+  const btn = document.getElementById('tgConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = 'Checking...';
+  try {
+    const r = await fetch('/api/telegram/connect/confirm', {method: 'POST'});
+    const data = await r.json();
+    if (data.ok) {
+      tgShowStatus('Connected! Chat ID: ' + data.chat_id, false);
+      document.getElementById('tgLink').style.display = 'none';
+      document.getElementById('tgConfirmBtn').style.display = 'none';
+      fetchTelegram();
+    } else {
+      tgShowStatus(data.error || 'Not found yet', true);
+    }
+  } catch (e) {
+    tgShowStatus('Failed: ' + e.message, true);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Confirm';
+}
+
+async function testTelegram() {
+  const btn = document.getElementById('tgTestBtn');
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  try {
+    const r = await fetch('/api/telegram/test', {method: 'POST'});
+    const data = await r.json();
+    if (data.ok) {
+      tgShowStatus('Test message sent!', false);
+    } else {
+      tgShowStatus(data.message || 'Send failed', true);
+    }
+  } catch (e) {
+    tgShowStatus('Send failed: ' + e.message, true);
+  }
+  btn.disabled = false;
+  btn.textContent = 'Send Test';
+}
+
+async function toggleTelegramAlerts() {
+  try {
+    const r = await fetch('/api/telegram/toggle', {method: 'POST'});
+    const data = await r.json();
+    if (data.ok) {
+      tgShowStatus('Alerts ' + (data.enabled ? 'enabled' : 'disabled'), false);
+      fetchTelegram();
+    }
+  } catch (e) {
+    tgShowStatus('Toggle failed: ' + e.message, true);
+  }
+}
+
 // Initial load
 fetchStats();
 fetchLogs();
 fetchAttesterInfo();
 fetchNodeIdentity();
+fetchTelegram();
 
 // Auto-refresh
 setInterval(fetchStats, 5000);
 setInterval(fetchLogs, 3000);
 setInterval(fetchAttesterInfo, 30000);
 setInterval(fetchNodeIdentity, 60000);
+setInterval(fetchTelegram, 30000);
 
 // Update service badges when stats update
 const origUpdateStats = updateStats;

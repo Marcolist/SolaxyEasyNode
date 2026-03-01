@@ -29,6 +29,251 @@ CELESTIA_STORE = os.path.expanduser("~/.celestia-light/")
 CONFIG_PATH = os.path.expanduser("~/svm-rollup/config.toml")
 GENESIS_CHAIN_STATE = os.path.expanduser("~/svm-rollup/genesis/chain_state_zk.json")
 
+# ---------------------------------------------------------------------------
+# Telegram Alert Integration
+# ---------------------------------------------------------------------------
+TELEGRAM_BOT_TOKEN = "8693879678:AAEe0QnBTWczAkJnQfAuxFcVCn1s1iOEgWs"
+TELEGRAM_BOT_USERNAME = "solaxynodebot"
+TELEGRAM_CONFIG_PATH = os.path.expanduser("~/dashboard/telegram.json")
+
+# In-memory last-known service states for alert transitions
+_service_states = {}
+_service_states_lock = threading.Lock()
+
+# Pending connect code (generated per connect attempt)
+_pending_connect_code = None
+
+
+def telegram_load_config():
+    """Load Telegram config from disk."""
+    try:
+        with open(TELEGRAM_CONFIG_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def telegram_save_config(cfg):
+    """Save Telegram config to disk."""
+    with open(TELEGRAM_CONFIG_PATH, "w") as f:
+        json.dump(cfg, f)
+
+
+def telegram_send_to(chat_id, text, parse_mode=None):
+    """Send a message to a specific chat_id via the Telegram bot."""
+    try:
+        params = {"chat_id": chat_id, "text": text}
+        if parse_mode:
+            params["parse_mode"] = parse_mode
+        r = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            params=params,
+            timeout=10,
+        )
+        data = r.json()
+        if data.get("ok"):
+            return True, "sent"
+        return False, data.get("description", "unknown error")
+    except Exception as e:
+        return False, str(e)
+
+
+def telegram_send(text):
+    """Send a message to the configured chat_id."""
+    cfg = telegram_load_config()
+    chat_id = cfg.get("chat_id")
+    if not chat_id:
+        return False, "No chat_id configured"
+    return telegram_send_to(chat_id, text)
+
+
+def telegram_find_chat_by_code(code):
+    """Search recent bot updates for a /start message containing the given code."""
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
+            params={"offset": -100},
+            timeout=10,
+        )
+        data = r.json()
+        if not data.get("ok"):
+            return None, data.get("description", "API error")
+        results = data.get("result", [])
+        if not results:
+            return None, "No messages yet. Click the link and send /start to the bot first."
+        # Search for /start <code> message
+        for update in reversed(results):
+            msg = update.get("message") or {}
+            text = msg.get("text", "")
+            if text == f"/start {code}":
+                chat_id = str(msg["chat"]["id"])
+                return chat_id, None
+        return None, "Code not found. Click the link below and press START in Telegram, then click Confirm."
+    except Exception as e:
+        return None, str(e)
+
+
+def _telegram_alert_loop():
+    """Background thread: check services every 60s and send alerts on state changes."""
+    import socket
+    hostname = socket.gethostname()
+    services = ["solaxy-node", "celestia-light", "postgresql"]
+
+    while True:
+        time.sleep(60)
+        cfg = telegram_load_config()
+        if not cfg.get("enabled") or not cfg.get("chat_id"):
+            continue
+
+        for svc in services:
+            active = run_cmd(f"systemctl is-active {svc}") == "active"
+            with _service_states_lock:
+                prev = _service_states.get(svc)
+                _service_states[svc] = active
+
+            if prev is None:
+                # First check — just record state, don't alert
+                continue
+            if prev and not active:
+                telegram_send(f"⚠️ Service {svc} is DOWN on {hostname}")
+            elif not prev and active:
+                telegram_send(f"✅ Service {svc} is back UP on {hostname}")
+
+
+def _telegram_build_health():
+    """Build a health status text from current service states."""
+    import socket
+    hostname = socket.gethostname()
+
+    services = [
+        ("solaxy-node", "solaxy-node"),
+        ("celestia-light", "celestia-light"),
+        ("postgresql", "postgresql"),
+    ]
+    lines = [f"📊 Health — {hostname}", ""]
+    for label, svc in services:
+        status = run_cmd(f"systemctl is-active {svc}")
+        icon = "✅" if status == "active" else "❌"
+        lines.append(f"{icon} {label}: {status}")
+
+    # Uptime
+    try:
+        with open("/proc/uptime") as f:
+            secs = int(float(f.read().split()[0]))
+            days, rem = divmod(secs, 86400)
+            hours, rem = divmod(rem, 3600)
+            mins, _ = divmod(rem, 60)
+            lines.append(f"\n⏱ Uptime: {days}d {hours}h {mins}m")
+    except Exception:
+        pass
+
+    # CPU / Memory
+    try:
+        with open("/proc/loadavg") as f:
+            load1 = f.read().split()[0]
+            lines.append(f"🖥 CPU Load (1m): {load1}")
+    except Exception:
+        pass
+
+    mem_raw = run_cmd("free -b | grep Mem")
+    if mem_raw:
+        parts = mem_raw.split()
+        if len(parts) >= 7:
+            used_gb = round(int(parts[2]) / 1024**3, 1)
+            total_gb = round(int(parts[1]) / 1024**3, 1)
+            pct = round(int(parts[2]) / int(parts[1]) * 100, 1)
+            lines.append(f"🧠 Memory: {used_gb}G / {total_gb}G ({pct}%)")
+
+    # Disk
+    import shutil as _shutil
+    disk = _shutil.disk_usage("/")
+    disk_pct = round(disk.used / disk.total * 100, 1)
+    lines.append(f"💾 Disk: {round(disk.used / 1024**3)}G / {round(disk.total / 1024**3)}G ({disk_pct}%)")
+
+    return "\n".join(lines)
+
+
+def _telegram_build_log(service="solaxy"):
+    """Build last 20 log lines for a service."""
+    import socket
+    hostname = socket.gethostname()
+    svc_map = {
+        "solaxy": "solaxy-node.service",
+        "celestia": "celestia-light.service",
+        "postgresql": "postgresql@16-main.service",
+    }
+    svc = svc_map.get(service, svc_map["solaxy"])
+    label = service if service in svc_map else "solaxy"
+    raw = run_cmd(f"journalctl -u {svc} -n 20 --no-pager -o short-iso 2>/dev/null")
+    if not raw:
+        return f"📋 No logs for {label} on {hostname}"
+    # Telegram has a 4096 char limit — truncate if needed
+    header = f"📋 Last 20 lines — {label} @ {hostname}\n\n"
+    max_len = 4096 - len(header)
+    if len(raw) > max_len:
+        raw = raw[-max_len:]
+    return header + raw
+
+
+# Offset tracker for the command polling loop
+_tg_cmd_offset = 0
+
+
+def _telegram_command_loop():
+    """Background thread: poll for incoming Telegram commands and reply."""
+    global _tg_cmd_offset
+
+    while True:
+        time.sleep(3)
+        cfg = telegram_load_config()
+        chat_id = cfg.get("chat_id")
+        if not chat_id:
+            continue
+
+        try:
+            params = {"timeout": 0}
+            if _tg_cmd_offset:
+                params["offset"] = _tg_cmd_offset
+            r = requests.get(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
+                params=params,
+                timeout=10,
+            )
+            data = r.json()
+            if not data.get("ok"):
+                continue
+            for update in data.get("result", []):
+                _tg_cmd_offset = update["update_id"] + 1
+                msg = update.get("message") or {}
+                msg_chat = str(msg.get("chat", {}).get("id", ""))
+                text = (msg.get("text") or "").strip()
+
+                # Only respond to the connected chat
+                if msg_chat != chat_id:
+                    continue
+
+                cmd = text.split("@")[0]  # strip @botname suffix
+
+                if cmd == "/health":
+                    telegram_send_to(chat_id, _telegram_build_health())
+                elif cmd.startswith("/log"):
+                    parts = text.split(None, 1)
+                    service = parts[1] if len(parts) > 1 else "solaxy"
+                    telegram_send_to(chat_id, _telegram_build_log(service))
+                elif cmd in ("/start", "/help"):
+                    welcome = (
+                        "👋 Welcome to Solaxy Node Bot!\n\n"
+                        "Available commands:\n\n"
+                        "/health — Service status & system stats\n"
+                        "/log — Last 20 solaxy-node log lines\n"
+                        "/log celestia — Last 20 celestia log lines\n"
+                        "/log postgresql — Last 20 postgresql log lines\n"
+                        "/help — Show this message"
+                    )
+                    telegram_send_to(chat_id, welcome)
+        except Exception:
+            pass
+
 
 def get_genesis_da_height():
     """Read genesis_da_height from chain_state_zk.json."""
@@ -637,6 +882,84 @@ def api_service_control(name, action):
     status = run_cmd(f"systemctl is-active {svc}")
 
     return jsonify({"ok": True, "service": name, "action": action, "status": status})
+
+
+# ---------------------------------------------------------------------------
+# Telegram API Endpoints
+# ---------------------------------------------------------------------------
+
+@app.route("/api/telegram")
+def api_telegram():
+    cfg = telegram_load_config()
+    return jsonify({
+        "connected": bool(cfg.get("chat_id")),
+        "chat_id": cfg.get("chat_id", ""),
+        "enabled": cfg.get("enabled", False),
+    })
+
+
+@app.route("/api/telegram/connect", methods=["POST"])
+def api_telegram_connect():
+    """Step 1: Generate a unique code and return a deep link for the user."""
+    import secrets
+    global _pending_connect_code
+    _pending_connect_code = secrets.token_hex(8)
+    link = f"https://t.me/{TELEGRAM_BOT_USERNAME}?start={_pending_connect_code}"
+    return jsonify({"ok": True, "code": _pending_connect_code, "link": link})
+
+
+@app.route("/api/telegram/connect/confirm", methods=["POST"])
+def api_telegram_connect_confirm():
+    """Step 2: Check if the user sent /start <code> to the bot."""
+    global _pending_connect_code
+    if not _pending_connect_code:
+        return jsonify({"ok": False, "error": "No pending connect. Click Connect first."})
+    chat_id, error = telegram_find_chat_by_code(_pending_connect_code)
+    if error:
+        return jsonify({"ok": False, "error": error})
+    cfg = telegram_load_config()
+    cfg["chat_id"] = chat_id
+    cfg.setdefault("enabled", True)
+    telegram_save_config(cfg)
+    _pending_connect_code = None
+    return jsonify({"ok": True, "chat_id": chat_id})
+
+
+@app.route("/api/telegram/test", methods=["POST"])
+def api_telegram_test():
+    import socket
+    hostname = socket.gethostname()
+    ok, msg = telegram_send(f"🔔 Test alert from {hostname} — Solaxy Node Dashboard")
+    return jsonify({"ok": ok, "message": msg})
+
+
+@app.route("/api/telegram/toggle", methods=["POST"])
+def api_telegram_toggle():
+    cfg = telegram_load_config()
+    cfg["enabled"] = not cfg.get("enabled", False)
+    telegram_save_config(cfg)
+    return jsonify({"ok": True, "enabled": cfg["enabled"]})
+
+
+# Register bot commands in the Telegram menu
+try:
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands",
+        json={"commands": [
+            {"command": "health", "description": "Service status & system stats"},
+            {"command": "log", "description": "Last 20 solaxy-node log lines"},
+            {"command": "help", "description": "Show available commands"},
+        ]},
+        timeout=10,
+    )
+except Exception:
+    pass
+
+# Start Telegram background threads
+_alert_thread = threading.Thread(target=_telegram_alert_loop, daemon=True)
+_alert_thread.start()
+_cmd_thread = threading.Thread(target=_telegram_command_loop, daemon=True)
+_cmd_thread.start()
 
 
 if __name__ == "__main__":
