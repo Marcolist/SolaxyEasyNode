@@ -9,6 +9,7 @@ User=%%USER%%
 Type=simple
 WorkingDirectory=%%HOME%%/svm-rollup
 Environment=SOV_PROVER_MODE=skip
+Environment=RUST_LOG=info
 ExecStart=%%HOME%%/svm-rollup/svm-rollup --da-layer celestia --rollup-config-path config.toml --genesis-config-dir genesis
 Restart=on-failure
 RestartSec=15
