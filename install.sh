@@ -4,11 +4,11 @@
 # Sets up: SVM Rollup + Celestia Light Node + PostgreSQL + Dashboard
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/USER/SolaxyEasyNode/main/install.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main/install.sh | bash
 # =============================================================================
 set -euo pipefail
 
-REPO_URL="https://raw.githubusercontent.com/USER/SolaxyEasyNode/main"
+REPO_URL="https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main"
 CELESTIA_CORE_IP="rpc.celestia.pops.one"
 CELESTIA_CORE_PORT="9090"
 CELESTIA_GRPC="http://${CELESTIA_CORE_IP}:${CELESTIA_CORE_PORT}"
@@ -259,10 +259,10 @@ log "Generating config.toml..."
 cd "$USER_HOME/svm-rollup"
 
 # Download template
-curl -sSL "${REPO_URL}/config.toml.template" -o /tmp/config.toml.template 2>/dev/null || true
+curl -fsSL "${REPO_URL}/config.toml.template" -o /tmp/config.toml.template 2>/dev/null || true
 
 # If curl failed (no internet or repo not public yet), use embedded template
-if [[ ! -f /tmp/config.toml.template ]]; then
+if [[ ! -f /tmp/config.toml.template || ! -s /tmp/config.toml.template ]] || ! grep -q '\[da\]' /tmp/config.toml.template 2>/dev/null; then
 cat > /tmp/config.toml.template << 'TMPL'
 [da]
 rpc_url = "ws://127.0.0.1:26658"
@@ -331,8 +331,8 @@ pip3 install --break-system-packages flask psycopg2-binary requests 2>/dev/null 
 log "Setting up dashboard..."
 mkdir -p "$USER_HOME/dashboard/templates"
 
-curl -sSL "${REPO_URL}/dashboard/app.py" -o "$USER_HOME/dashboard/app.py" 2>/dev/null || true
-curl -sSL "${REPO_URL}/dashboard/templates/index.html" -o "$USER_HOME/dashboard/templates/index.html" 2>/dev/null || true
+curl -fsSL "${REPO_URL}/dashboard/app.py" -o "$USER_HOME/dashboard/app.py" 2>/dev/null || true
+curl -fsSL "${REPO_URL}/dashboard/templates/index.html" -o "$USER_HOME/dashboard/templates/index.html" 2>/dev/null || true
 
 if [[ ! -f "$USER_HOME/dashboard/app.py" ]]; then
     warn "Could not download dashboard files. Copy them manually from the repo."
@@ -366,10 +366,10 @@ install_service() {
     local url="${REPO_URL}/services/${name}"
     local tmp="/tmp/${name}"
 
-    curl -sSL "$url" -o "$tmp" 2>/dev/null || true
+    curl -fsSL "$url" -o "$tmp" 2>/dev/null || true
 
     # If download failed, generate from embedded template
-    if [[ ! -f "$tmp" || ! -s "$tmp" ]]; then
+    if [[ ! -f "$tmp" || ! -s "$tmp" ]] || ! grep -q '\[Unit\]' "$tmp" 2>/dev/null; then
         warn "Could not download ${name}, using embedded version."
         case "$name" in
             solaxy-node.service)
