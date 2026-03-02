@@ -389,20 +389,20 @@ def _telegram_alert_loop():
                     # First check -- just record state, don't alert
                     pass
                 elif prev and not active:
-                    telegram_send(f"Warning: Service {svc} is DOWN on {hostname}")
+                    telegram_send(f"\u26a0\ufe0f Service {svc} is DOWN on {hostname}")
                     # Auto-restart if enabled
                     if cfg.get("auto_restart") and _can_auto_restart(svc):
                         svc_unit = ALLOWED_SERVICES.get(svc, f"{svc}.service")
                         result = run_cmd(f"sudo systemctl restart {svc_unit}", timeout=30)
                         new_status = run_cmd(f"systemctl is-active {svc}")
                         if new_status == "active":
-                            telegram_send(f"Auto-restart: {svc} restarted successfully on {hostname}")
+                            telegram_send(f"\u2705 Auto-restart: {svc} restarted successfully on {hostname}")
                             with _service_states_lock:
                                 _service_states[svc] = True
                         else:
-                            telegram_send(f"Auto-restart: {svc} restart FAILED on {hostname}")
+                            telegram_send(f"\u274c Auto-restart: {svc} restart FAILED on {hostname}")
                 elif not prev and active:
-                    telegram_send(f"Service {svc} is back UP on {hostname}")
+                    telegram_send(f"\u2705 Service {svc} is back UP on {hostname}")
 
         # Log CPU/Memory/DA-Rate to metrics_log
         try:
@@ -475,7 +475,7 @@ def _balance_record_loop():
             threshold = cfg.get("tia_low_threshold", 0.5)
             if cfg.get("enabled") and cfg.get("chat_id") and tia < threshold and tia > 0:
                 telegram_send(
-                    f"Warning: TIA balance is low: {tia:.4f} TIA (threshold: {threshold})"
+                    f"\u26a0\ufe0f TIA balance is low: {tia:.4f} TIA (threshold: {threshold})"
                 )
         except Exception:
             pass
@@ -491,11 +491,11 @@ def _telegram_build_health():
         ("celestia-light", "celestia-light"),
         ("postgresql", "postgresql"),
     ]
-    lines = [f"Health -- {hostname}", ""]
+    lines = [f"\ud83d\udcca Health \u2014 {hostname}", ""]
     for label, svc in services:
         status = run_cmd(f"systemctl is-active {svc}")
-        icon = "OK" if status == "active" else "FAIL"
-        lines.append(f"[{icon}] {label}: {status}")
+        icon = "\u2705" if status == "active" else "\u274c"
+        lines.append(f"{icon} {label}: {status}")
 
     # Uptime
     try:
@@ -564,7 +564,7 @@ def _telegram_build_balance():
     solx_raw = info.get("solx_balance", "0")
     solx = int(solx_raw) / 1e6 if solx_raw else 0
 
-    lines = [f"TIA: {tia:.4f}", f"SOLX: {solx:.2f}"]
+    lines = [f"\ud83d\udcb0 TIA: {tia:.4f}", f"\ud83e\ude99 SOLX: {solx:.2f}"]
 
     # 24h delta
     try:
@@ -645,8 +645,8 @@ def _telegram_command_loop():
                     cfg = telegram_load_config()
                     cfg["auto_restart"] = not cfg.get("auto_restart", False)
                     telegram_save_config(cfg)
-                    status = "ON" if cfg["auto_restart"] else "OFF"
-                    telegram_send_to(chat_id, f"Auto-restart is now {status}")
+                    status = "\u2705 ON" if cfg["auto_restart"] else "\u274c OFF"
+                    telegram_send_to(chat_id, f"\ud83d\udd04 Auto-restart is now {status}")
 
                 elif base_cmd in ("/restart", "/stop") and cmd_arg:
                     # Remote service control
@@ -656,9 +656,10 @@ def _telegram_command_loop():
                         svc_unit = ALLOWED_SERVICES[svc_name]
                         run_cmd(f"sudo systemctl {action} {svc_unit}", timeout=30)
                         new_status = run_cmd(f"systemctl is-active {svc_name}")
+                        icon = "\u2705" if new_status == "active" else "\u274c"
                         telegram_send_to(
                             chat_id,
-                            f"{action.title()}: {svc_name} -> {new_status}",
+                            f"{icon} {action.title()}: {svc_name} \u2192 {new_status}",
                         )
                     else:
                         avail = ", ".join(ALLOWED_SERVICES.keys())
@@ -671,37 +672,38 @@ def _telegram_command_loop():
                         svc_unit = ALLOWED_SERVICES[svc_name]
                         run_cmd(f"sudo systemctl start {svc_unit}", timeout=30)
                         new_status = run_cmd(f"systemctl is-active {svc_name}")
-                        telegram_send_to(chat_id, f"Start: {svc_name} -> {new_status}")
+                        icon = "\u2705" if new_status == "active" else "\u274c"
+                        telegram_send_to(chat_id, f"{icon} Start: {svc_name} \u2192 {new_status}")
                     else:
                         avail = ", ".join(ALLOWED_SERVICES.keys())
                         telegram_send_to(chat_id, f"Unknown service: {svc_name}\nAvailable: {avail}")
 
                 elif base_cmd == "/update":
-                    telegram_send_to(chat_id, "Updating dashboard...")
+                    telegram_send_to(chat_id, "\ud83d\udd04 Updating dashboard...")
                     try:
                         git_out = run_cmd("cd ~/SolaxyEasyNode && git pull", timeout=30)
                         # Copy files
                         run_cmd("cp -r ~/SolaxyEasyNode/dashboard/* ~/dashboard/", timeout=10)
-                        telegram_send_to(chat_id, f"Update done:\n{git_out}\n\nRestarting dashboard...")
+                        telegram_send_to(chat_id, f"\u2705 Update done:\n{git_out}\n\n\ud83d\udd04 Restarting dashboard...")
                         run_cmd("sudo systemctl restart solaxy-dashboard.service", timeout=15)
                     except Exception as e:
-                        telegram_send_to(chat_id, f"Update failed: {e}")
+                        telegram_send_to(chat_id, f"\u274c Update failed: {e}")
 
                 elif base_cmd in ("/start", "/help"):
                     welcome = (
-                        "Solaxy Node Bot\n\n"
+                        "\ud83e\udd16 Solaxy Node Bot\n\n"
                         "Available commands:\n\n"
-                        "/health -- Service status & system stats\n"
-                        "/log -- Last 20 solaxy-node log lines\n"
-                        "/log celestia -- Celestia log lines\n"
-                        "/log postgresql -- PostgreSQL log lines\n"
-                        "/balance -- TIA & SOLX balance + 24h delta\n"
-                        "/restart <svc> -- Restart a service\n"
-                        "/start <svc> -- Start a service\n"
-                        "/stop <svc> -- Stop a service\n"
-                        "/autorestart -- Toggle auto-restart\n"
-                        "/update -- Pull & update dashboard\n"
-                        "/help -- Show this message"
+                        "\ud83d\udcca /health \u2014 Service status & system stats\n"
+                        "\ud83d\udcc4 /log \u2014 Last 20 solaxy-node log lines\n"
+                        "\ud83d\udcc4 /log celestia \u2014 Celestia log lines\n"
+                        "\ud83d\udcc4 /log postgresql \u2014 PostgreSQL log lines\n"
+                        "\ud83d\udcb0 /balance \u2014 TIA & SOLX balance + 24h delta\n"
+                        "\ud83d\udd04 /restart <svc> \u2014 Restart a service\n"
+                        "\u25b6\ufe0f /start <svc> \u2014 Start a service\n"
+                        "\u23f9\ufe0f /stop <svc> \u2014 Stop a service\n"
+                        "\ud83d\udee1\ufe0f /autorestart \u2014 Toggle auto-restart\n"
+                        "\u2b06\ufe0f /update \u2014 Pull & update dashboard\n"
+                        "\u2753 /help \u2014 Show this message"
                     )
                     telegram_send_to(chat_id, welcome)
         except Exception:
