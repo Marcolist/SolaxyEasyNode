@@ -31,6 +31,13 @@ _cache = {}
 _cache_lock = threading.Lock()
 
 CELESTIA_STORE = os.path.expanduser("~/.celestia-light/")
+DASHBOARD_DIR = Path.home() / "dashboard"
+REPO_RAW_URL = "https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main"
+DASHBOARD_FILES = [
+    ("dashboard/app.py", "app.py"),
+    ("dashboard/templates/index.html", "templates/index.html"),
+    ("dashboard/static/logo.png", "static/logo.png"),
+]
 CONFIG_PATH = os.path.expanduser("~/svm-rollup/config.toml")
 GENESIS_CHAIN_STATE = os.path.expanduser("~/svm-rollup/genesis/chain_state_zk.json")
 
@@ -925,11 +932,12 @@ def _telegram_command_loop():
                 elif base_cmd == "/update":
                     telegram_send_to(chat_id, "🔄 Updating dashboard...")
                     try:
-                        git_out = run_cmd("cd ~/SolaxyEasyNode && git pull", timeout=30)
-                        # Copy files
-                        run_cmd("cp -r ~/SolaxyEasyNode/dashboard/* ~/dashboard/", timeout=10)
-                        telegram_send_to(chat_id, f"✅ Update done:\n{git_out}\n\n🔄 Restarting dashboard...")
-                        run_cmd("sudo systemctl restart solaxy-dashboard.service", timeout=15)
+                        updated, errors = _pull_dashboard_files()
+                        if errors:
+                            telegram_send_to(chat_id, f"⚠️ Partial update:\n✅ {', '.join(updated)}\n❌ {'; '.join(errors)}")
+                        else:
+                            telegram_send_to(chat_id, f"✅ Updated: {', '.join(updated)}\n\n🔄 Restarting dashboard...")
+                            run_cmd("sudo systemctl restart solaxy-dashboard.service", timeout=15)
                     except Exception as e:
                         telegram_send_to(chat_id, f"❌ Update failed: {e}")
 
@@ -1873,13 +1881,32 @@ def api_map_reset():
 # One-Click Update API
 # ---------------------------------------------------------------------------
 
+def _pull_dashboard_files():
+    """Download latest dashboard files from GitHub."""
+    updated = []
+    errors = []
+    for repo_path, local_path in DASHBOARD_FILES:
+        try:
+            url = f"{REPO_RAW_URL}/{repo_path}"
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+            dest = DASHBOARD_DIR / local_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(resp.content)
+            updated.append(local_path)
+        except Exception as e:
+            errors.append(f"{local_path}: {e}")
+    return updated, errors
+
+
 @app.route("/api/update", methods=["POST"])
 def api_update():
-    """Git pull in ~/SolaxyEasyNode, copy files to ~/dashboard."""
+    """Download latest dashboard files from GitHub."""
     try:
-        git_output = run_cmd("cd ~/SolaxyEasyNode && git pull", timeout=30)
-        copy_output = run_cmd("cp -r ~/SolaxyEasyNode/dashboard/* ~/dashboard/", timeout=10)
-        return jsonify({"ok": True, "git_output": git_output, "copy_output": copy_output})
+        updated, errors = _pull_dashboard_files()
+        if errors:
+            return jsonify({"ok": False, "updated": updated, "errors": errors}), 500
+        return jsonify({"ok": True, "updated": updated})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
