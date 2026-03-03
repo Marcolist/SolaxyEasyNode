@@ -41,6 +41,14 @@ Running a Solaxy node currently requires multiple manual steps:
 
 SolaxyEasyNode reduces setup time and provides a production-ready dashboard + Telegram alerts.
 
+## Screenshots
+
+### Node Dashboard
+![Dashboard](screenshots/dashboard.png)
+
+### Telegram Bot
+![Telegram Bot](screenshots/telegrambot.png)
+
 ## What Gets Installed
 
 | Component | Description |
