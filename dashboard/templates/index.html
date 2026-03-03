@@ -109,9 +109,8 @@ h3{font-size:14px;color:#f0f6fc;margin-bottom:10px;display:flex;align-items:cent
 .cfg-saved{color:#3fb950;font-size:12px;display:none;align-items:center;gap:4px}
 .cfg-error{color:#f85149;font-size:12px;display:none;align-items:center;gap:4px}
 
-/* Network Map */
-.map-section{margin-bottom:8px}
-.map-status-row{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:12px}
+/* Public Validator Map */
+.map-status-row{display:flex;align-items:center;gap:8px;font-size:12px}
 .map-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
 .map-dot.green{background:#3fb950}
 .map-dot.yellow{background:#d29922}
@@ -274,6 +273,26 @@ canvas.sparkline{vertical-align:middle}
       </div>
       <div style="margin-top:10px;border-top:1px solid #30363d;padding-top:8px"><span class="stat-label">Solaxy L2 Wallet</span><div style="color:#58a6ff;font-size:11px;word-break:break-all" id="nodeSolxWallet">-</div></div>
       <div style="margin-top:6px"><span class="stat-label">SOLX Balance</span><div style="color:#c9d1d9" id="nodeSolxBalance">-</div></div>
+
+      <div style="margin-top:12px;border-top:1px solid #30363d;padding-top:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span class="stat-label">Public Validator Map</span>
+          <label class="map-switch"><input type="checkbox" id="mapToggle" onchange="toggleMap()"><span class="slider"></span></label>
+        </div>
+        <div class="map-status-row" id="mapStatusRow" style="display:none;margin-top:6px">
+          <span class="map-dot gray" id="mapDot"></span>
+          <span id="mapStatusText" style="color:#8b949e">Not registered</span>
+        </div>
+        <div class="map-nickname" id="mapNicknameRow" style="display:none;margin-top:6px">
+          <input type="text" id="mapNickname" placeholder="Nickname (3-32 chars)" maxlength="32">
+          <button class="btn btn-primary btn-sm" id="mapRegisterBtn" onclick="registerMap()">Register</button>
+        </div>
+        <div class="map-actions" id="mapActions" style="display:none;margin-top:6px">
+          <a href="https://map.orbitnode.dev" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">View Map</a>
+          <button class="btn btn-danger btn-sm" onclick="resetMap()">Reset</button>
+        </div>
+        <div class="map-msg" id="mapMsg"></div>
+      </div>
     </div>
   </div>
 
@@ -455,27 +474,6 @@ canvas.sparkline{vertical-align:middle}
     <button class="btn btn-danger btn-sm" onclick="restartDashboard()">Restart Dashboard</button>
   </div>
   <div class="update-output" id="updateOutput"></div>
-
-  <h4>Network Map</h4>
-  <div class="map-section">
-    <div class="map-toggle-wrap">
-      <label class="map-switch"><input type="checkbox" id="mapToggle" onchange="toggleMap()"><span class="slider"></span></label>
-      <span style="color:#c9d1d9;font-size:12px">Opt-in to Network Map</span>
-    </div>
-    <div class="map-nickname" id="mapNicknameRow" style="display:none">
-      <input type="text" id="mapNickname" placeholder="Choose a nickname (3-32 chars)" maxlength="32">
-      <button class="btn btn-primary btn-sm" id="mapRegisterBtn" onclick="registerMap()">Register</button>
-    </div>
-    <div class="map-status-row" id="mapStatusRow" style="display:none">
-      <span class="map-dot gray" id="mapDot"></span>
-      <span id="mapStatusText" style="color:#8b949e">Not registered</span>
-    </div>
-    <div class="map-actions" id="mapActions" style="display:none">
-      <a href="https://map.orbitnode.dev" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">View Network Map</a>
-      <button class="btn btn-danger btn-sm" onclick="resetMap()">Reset</button>
-    </div>
-    <div class="map-msg" id="mapMsg"></div>
-  </div>
 
   <h4>DA Layer Settings</h4>
   <div class="cfg-grid">
@@ -1375,7 +1373,7 @@ async function changePassword() {
 }
 
 // ---------------------------------------------------------------------------
-// Network Map
+// Public Validator Map
 // ---------------------------------------------------------------------------
 async function loadMapStatus() {
   try {
@@ -1511,7 +1509,7 @@ async function registerMap() {
 }
 
 async function resetMap() {
-  if (!confirm('Reset Network Map registration? You will need to re-register with a new nickname.')) return;
+  if (!confirm('Reset Public Validator Map registration? You will need to re-register with a new nickname.')) return;
   const msg = document.getElementById('mapMsg');
   try {
     const r = await fetch('/api/map/reset', {method: 'POST'});

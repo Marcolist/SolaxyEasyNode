@@ -35,7 +35,7 @@ CONFIG_PATH = os.path.expanduser("~/svm-rollup/config.toml")
 GENESIS_CHAIN_STATE = os.path.expanduser("~/svm-rollup/genesis/chain_state_zk.json")
 
 # ---------------------------------------------------------------------------
-# Network Map Integration
+# Public Validator Map Integration
 # ---------------------------------------------------------------------------
 MAP_CONFIG_PATH = Path.home() / ".solaxy-map.json"
 MAP_BACKEND_URL = "https://map.orbitnode.dev/api/map"
@@ -58,7 +58,7 @@ def _validate_nickname(nickname):
 
 
 def load_map_config():
-    """Load local Network Map configuration."""
+    """Load local Public Validator Map configuration."""
     if MAP_CONFIG_PATH.exists():
         try:
             return json.loads(MAP_CONFIG_PATH.read_text())
@@ -68,19 +68,19 @@ def load_map_config():
 
 
 def save_map_config(config):
-    """Save Network Map configuration with restricted permissions (0600)."""
+    """Save Public Validator Map configuration with restricted permissions (0600)."""
     MAP_CONFIG_PATH.write_text(json.dumps(config, indent=2))
     MAP_CONFIG_PATH.chmod(0o600)
 
 
 def delete_map_config():
-    """Delete Network Map configuration (reset)."""
+    """Delete Public Validator Map configuration (reset)."""
     if MAP_CONFIG_PATH.exists():
         MAP_CONFIG_PATH.unlink()
 
 
 def _register_map_node(nickname):
-    """Register node with Network Map backend. Returns config dict or error dict."""
+    """Register node with Public Validator Map backend. Returns config dict or error dict."""
     try:
         resp = requests.post(
             f"{MAP_BACKEND_URL}/register",
@@ -163,7 +163,7 @@ def _get_node_stats_for_map():
 
 
 def _send_map_heartbeat():
-    """Send a single heartbeat to the Network Map backend. Returns True on success."""
+    """Send a single heartbeat to the Public Validator Map backend. Returns True on success."""
     config = load_map_config()
     if not config or not config.get("map_enabled"):
         return False
@@ -197,7 +197,7 @@ def _send_map_heartbeat():
 
 
 class MapHeartbeatService:
-    """Background service for periodic Network Map heartbeats."""
+    """Background service for periodic Public Validator Map heartbeats."""
 
     def __init__(self):
         self._thread = None
@@ -1803,12 +1803,12 @@ def api_telegram_auto_restart():
 
 
 # ---------------------------------------------------------------------------
-# Network Map API Endpoints
+# Public Validator Map API Endpoints
 # ---------------------------------------------------------------------------
 
 @app.route("/api/map/status")
 def api_map_status():
-    """Get current Network Map registration and heartbeat status."""
+    """Get current Public Validator Map registration and heartbeat status."""
     config = load_map_config()
     if not config:
         return jsonify({"registered": False, "enabled": False, "status": "not_registered"})
@@ -1822,7 +1822,7 @@ def api_map_status():
 
 @app.route("/api/map/register", methods=["POST"])
 def api_map_register():
-    """Register this node with the Network Map."""
+    """Register this node with the Public Validator Map."""
     config = load_map_config()
     if config and config.get("node_id"):
         return jsonify({"error": "Already registered. Reset first to re-register."}), 400
@@ -1844,7 +1844,7 @@ def api_map_register():
 
 @app.route("/api/map/toggle", methods=["POST"])
 def api_map_toggle():
-    """Enable or disable Network Map heartbeats."""
+    """Enable or disable Public Validator Map heartbeats."""
     config = load_map_config()
     if not config:
         return jsonify({"error": "Not registered"}), 400
@@ -1863,7 +1863,7 @@ def api_map_toggle():
 
 @app.route("/api/map/reset", methods=["POST"])
 def api_map_reset():
-    """Reset Network Map registration (deletes credentials)."""
+    """Reset Public Validator Map registration (deletes credentials)."""
     _map_heartbeat_service.stop()
     delete_map_config()
     return jsonify({"ok": True})
@@ -1924,7 +1924,7 @@ _cmd_thread.start()
 _balance_thread = threading.Thread(target=_balance_record_loop, daemon=True)
 _balance_thread.start()
 
-# Auto-start Network Map heartbeat if previously enabled
+# Auto-start Public Validator Map heartbeat if previously enabled
 _map_cfg = load_map_config()
 if _map_cfg and _map_cfg.get("map_enabled"):
     _map_heartbeat_service.start()
