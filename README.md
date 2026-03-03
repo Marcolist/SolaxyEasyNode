@@ -31,6 +31,16 @@ curl -sSL https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main/instal
 
 The installer shows progress bars for all downloads and extractions.
 
+## Why this exists
+
+Running a Solaxy node currently requires multiple manual steps:
+- Celestia build
+- Rollup config
+- Service wiring
+- Monitoring setup
+
+SolaxyEasyNode reduces setup time and provides a production-ready dashboard + Telegram alerts.
+
 ## What Gets Installed
 
 | Component | Description |
