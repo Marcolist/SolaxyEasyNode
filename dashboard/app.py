@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -12,6 +13,7 @@ import subprocess
 import time
 import threading
 from functools import lru_cache
+from pathlib import Path
 
 import psycopg2
 import requests
@@ -31,6 +33,249 @@ _cache_lock = threading.Lock()
 CELESTIA_STORE = os.path.expanduser("~/.celestia-light/")
 CONFIG_PATH = os.path.expanduser("~/svm-rollup/config.toml")
 GENESIS_CHAIN_STATE = os.path.expanduser("~/svm-rollup/genesis/chain_state_zk.json")
+
+# ---------------------------------------------------------------------------
+# Network Map Integration
+# ---------------------------------------------------------------------------
+MAP_CONFIG_PATH = Path.home() / ".solaxy-map.json"
+MAP_BACKEND_URL = "https://map.orbitnode.dev/api/map"
+MAP_HEARTBEAT_INTERVAL = 300  # 5 minutes
+MAP_RETRY_INTERVAL = 60       # 1 minute on error
+MAP_BACKOFF_INTERVAL = 600    # 10 minutes after many errors
+MAP_MAX_CONSECUTIVE_ERRORS = 10
+_NICKNAME_RE = re.compile(r"^[a-zA-Z0-9_-]{3,32}$")
+
+_map_logger = logging.getLogger("network_map")
+
+
+def _validate_nickname(nickname):
+    """Validate nickname against API rules. Returns error string or None."""
+    if not nickname or not isinstance(nickname, str):
+        return "Missing nickname"
+    if not _NICKNAME_RE.match(nickname):
+        return "Invalid nickname. Must be 3-32 characters: a-z A-Z 0-9 _ -"
+    return None
+
+
+def load_map_config():
+    """Load local Network Map configuration."""
+    if MAP_CONFIG_PATH.exists():
+        try:
+            return json.loads(MAP_CONFIG_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+    return None
+
+
+def save_map_config(config):
+    """Save Network Map configuration with restricted permissions (0600)."""
+    MAP_CONFIG_PATH.write_text(json.dumps(config, indent=2))
+    MAP_CONFIG_PATH.chmod(0o600)
+
+
+def delete_map_config():
+    """Delete Network Map configuration (reset)."""
+    if MAP_CONFIG_PATH.exists():
+        MAP_CONFIG_PATH.unlink()
+
+
+def _register_map_node(nickname):
+    """Register node with Network Map backend. Returns config dict or error dict."""
+    try:
+        resp = requests.post(
+            f"{MAP_BACKEND_URL}/register",
+            json={"nickname": nickname},
+            timeout=10,
+        )
+        if resp.status_code == 201:
+            data = resp.json()
+            config = {
+                "node_id": data["node_id"],
+                "auth_token": data["auth_token"],
+                "nickname": data["nickname"],
+                "map_enabled": True,
+                "backend_url": MAP_BACKEND_URL,
+            }
+            save_map_config(config)
+            _map_logger.info("Node registered as '%s'", nickname)
+            return config
+        elif resp.status_code == 409:
+            return {"error": "Nickname already taken"}
+        elif resp.status_code == 429:
+            return {"error": "Rate limit exceeded. Try again later."}
+        elif resp.status_code == 400:
+            return {"error": resp.json().get("error", "Invalid request")}
+        else:
+            return {"error": f"Registration failed (HTTP {resp.status_code})"}
+    except requests.RequestException as e:
+        _map_logger.error("Registration request failed: %s", e)
+        return {"error": "Connection to map server failed"}
+
+
+def _get_node_stats_for_map():
+    """Collect current node stats for heartbeat payload."""
+    # Sync status: check if solaxy-node service is running
+    svc = systemd_status("solaxy-node.service")
+    logs = parse_solaxy_logs()
+
+    if not svc.get("active"):
+        sync_status = "offline"
+    else:
+        synced_da = logs.get("synced_da_height", 0)
+        target_da = logs.get("target_da_height", 0)
+        if synced_da > 0 and target_da > 0 and synced_da >= target_da:
+            sync_status = "synced"
+        else:
+            sync_status = "syncing"
+
+    # Uptime: seconds since solaxy-node service started
+    uptime_seconds = 0
+    started_str = svc.get("started", "")
+    if started_str and started_str != "n/a":
+        try:
+            # systemd ActiveEnterTimestamp format: "Day YYYY-MM-DD HH:MM:SS TZ"
+            parts = started_str.strip().split()
+            if len(parts) >= 3:
+                from datetime import datetime
+                dt_str = f"{parts[1]} {parts[2]}"
+                dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+                uptime_seconds = max(0, int(time.time() - dt.timestamp()))
+        except Exception:
+            pass
+
+    # Slot from local RPC or logs
+    slot = _rpc_call(LOCAL_RPC, "getSlot") or 0
+    if slot == 0:
+        slot = logs.get("slot_number", 0)
+
+    # DA height from logs or background thread
+    da_height = logs.get("synced_da_height", 0)
+    if da_height == 0:
+        with _block_stats_lock:
+            da_height = _block_stats.get("last_da") or 0
+
+    return {
+        "sync_status": sync_status,
+        "uptime_seconds": uptime_seconds,
+        "slot": slot,
+        "da_height": da_height,
+    }
+
+
+def _send_map_heartbeat():
+    """Send a single heartbeat to the Network Map backend. Returns True on success."""
+    config = load_map_config()
+    if not config or not config.get("map_enabled"):
+        return False
+
+    stats = _get_node_stats_for_map()
+
+    try:
+        resp = requests.post(
+            f"{config['backend_url']}/heartbeat",
+            headers={
+                "Authorization": f"Bearer {config['auth_token']}",
+                "X-Node-ID": config["node_id"],
+            },
+            json=stats,
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return True
+        elif resp.status_code == 429:
+            _map_logger.debug("Heartbeat rate-limited, will retry later")
+            return False
+        elif resp.status_code == 401:
+            _map_logger.error("Heartbeat auth failed - credentials invalid")
+            return False
+        else:
+            _map_logger.warning("Heartbeat failed: HTTP %d", resp.status_code)
+            return False
+    except requests.RequestException as e:
+        _map_logger.debug("Heartbeat request failed: %s", e)
+        return False
+
+
+class MapHeartbeatService:
+    """Background service for periodic Network Map heartbeats."""
+
+    def __init__(self):
+        self._thread = None
+        self._running = False
+        self._last_success = None
+        self._last_error = None
+        self._consecutive_errors = 0
+        self._lock = threading.Lock()
+
+    def start(self):
+        """Start the heartbeat background thread."""
+        with self._lock:
+            if self._running:
+                return
+            self._running = True
+            self._thread = threading.Thread(target=self._loop, daemon=True)
+            self._thread.start()
+            _map_logger.info("Map heartbeat service started")
+
+    def stop(self):
+        """Stop the heartbeat background thread."""
+        with self._lock:
+            self._running = False
+            _map_logger.info("Map heartbeat service stopped")
+
+    @property
+    def is_running(self):
+        return self._running
+
+    @property
+    def status(self):
+        """Current status string for UI display."""
+        config = load_map_config()
+        if not config:
+            return "not_registered"
+        if not config.get("map_enabled"):
+            return "paused"
+        if not self._running:
+            return "stopped"
+        if self._last_error:
+            return f"error:{self._last_error}"
+        if self._last_success:
+            ago = int(time.time() - self._last_success)
+            if ago < 360:
+                return "connected"
+            return f"last_heartbeat:{ago // 60}m"
+        return "starting"
+
+    def _loop(self):
+        while self._running:
+            try:
+                success = _send_map_heartbeat()
+                if success:
+                    self._consecutive_errors = 0
+                    self._last_success = time.time()
+                    self._last_error = None
+                    sleep_time = MAP_HEARTBEAT_INTERVAL
+                else:
+                    self._consecutive_errors += 1
+                    self._last_error = "connection_failed"
+                    if self._consecutive_errors >= MAP_MAX_CONSECUTIVE_ERRORS:
+                        sleep_time = MAP_BACKOFF_INTERVAL
+                    else:
+                        sleep_time = MAP_RETRY_INTERVAL
+            except Exception as e:
+                self._consecutive_errors += 1
+                self._last_error = str(e)
+                sleep_time = MAP_RETRY_INTERVAL
+
+            # Sleep in small increments so stop() takes effect quickly
+            for _ in range(int(sleep_time)):
+                if not self._running:
+                    break
+                time.sleep(1)
+
+
+_map_heartbeat_service = MapHeartbeatService()
+
 
 # ---------------------------------------------------------------------------
 # Telegram Alert Integration
@@ -1558,6 +1803,73 @@ def api_telegram_auto_restart():
 
 
 # ---------------------------------------------------------------------------
+# Network Map API Endpoints
+# ---------------------------------------------------------------------------
+
+@app.route("/api/map/status")
+def api_map_status():
+    """Get current Network Map registration and heartbeat status."""
+    config = load_map_config()
+    if not config:
+        return jsonify({"registered": False, "enabled": False, "status": "not_registered"})
+    return jsonify({
+        "registered": True,
+        "enabled": config.get("map_enabled", False),
+        "nickname": config.get("nickname", ""),
+        "status": _map_heartbeat_service.status,
+    })
+
+
+@app.route("/api/map/register", methods=["POST"])
+def api_map_register():
+    """Register this node with the Network Map."""
+    config = load_map_config()
+    if config and config.get("node_id"):
+        return jsonify({"error": "Already registered. Reset first to re-register."}), 400
+
+    data = request.get_json(silent=True) or {}
+    nickname = data.get("nickname", "").strip()
+
+    err = _validate_nickname(nickname)
+    if err:
+        return jsonify({"error": err}), 400
+
+    result = _register_map_node(nickname)
+    if "error" in result:
+        return jsonify(result), 400
+
+    _map_heartbeat_service.start()
+    return jsonify({"ok": True, "nickname": result["nickname"]})
+
+
+@app.route("/api/map/toggle", methods=["POST"])
+def api_map_toggle():
+    """Enable or disable Network Map heartbeats."""
+    config = load_map_config()
+    if not config:
+        return jsonify({"error": "Not registered"}), 400
+
+    new_state = not config.get("map_enabled", False)
+    config["map_enabled"] = new_state
+    save_map_config(config)
+
+    if new_state:
+        _map_heartbeat_service.start()
+    else:
+        _map_heartbeat_service.stop()
+
+    return jsonify({"ok": True, "enabled": new_state})
+
+
+@app.route("/api/map/reset", methods=["POST"])
+def api_map_reset():
+    """Reset Network Map registration (deletes credentials)."""
+    _map_heartbeat_service.stop()
+    delete_map_config()
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
 # One-Click Update API
 # ---------------------------------------------------------------------------
 
@@ -1611,6 +1923,11 @@ _cmd_thread = threading.Thread(target=_telegram_command_loop, daemon=True)
 _cmd_thread.start()
 _balance_thread = threading.Thread(target=_balance_record_loop, daemon=True)
 _balance_thread.start()
+
+# Auto-start Network Map heartbeat if previously enabled
+_map_cfg = load_map_config()
+if _map_cfg and _map_cfg.get("map_enabled"):
+    _map_heartbeat_service.start()
 
 
 if __name__ == "__main__":
