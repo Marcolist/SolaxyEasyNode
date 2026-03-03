@@ -477,6 +477,15 @@ install_service "solaxy-dashboard.service"
 sudo systemctl daemon-reload
 sudo systemctl enable celestia-light solaxy-node solaxy-dashboard
 
+# Allow the dashboard to manage services without a password prompt
+log "Configuring passwordless sudo for service management..."
+sudo tee /etc/sudoers.d/solaxy-dashboard > /dev/null << EOF
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start solaxy-node.service, /usr/bin/systemctl stop solaxy-node.service, /usr/bin/systemctl restart solaxy-node.service
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start celestia-light.service, /usr/bin/systemctl stop celestia-light.service, /usr/bin/systemctl restart celestia-light.service
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start solaxy-dashboard.service, /usr/bin/systemctl stop solaxy-dashboard.service, /usr/bin/systemctl restart solaxy-dashboard.service
+EOF
+sudo chmod 440 /etc/sudoers.d/solaxy-dashboard
+
 # ---------------------------------------------------------------------------
 # Step 14: Open firewall for dashboard
 # ---------------------------------------------------------------------------
