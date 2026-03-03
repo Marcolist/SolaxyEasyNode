@@ -207,8 +207,8 @@ else
     warn "Celestia light node already initialized."
 fi
 
-# Configure Celestia pruning window and sync start point
-if [[ -f "$CELESTIA_STORE/config.toml" ]]; then
+# Configure Celestia pruning window and sync start point (only on fresh init)
+if [[ -f "$CELESTIA_STORE/config.toml" && ! -d "$CELESTIA_STORE/data" ]]; then
     log "Configuring Celestia pruning window..."
     sed -i "s|PruningWindow = .*|PruningWindow = \"${CELESTIA_PRUNING_WINDOW}\"|" "$CELESTIA_STORE/config.toml"
     if [[ -n "$CELESTIA_SYNC_FROM_HEIGHT" && -n "$CELESTIA_SYNC_FROM_HASH" ]]; then
@@ -216,6 +216,8 @@ if [[ -f "$CELESTIA_STORE/config.toml" ]]; then
         sed -i "s|SyncFromHeight = .*|SyncFromHeight = ${CELESTIA_SYNC_FROM_HEIGHT}|" "$CELESTIA_STORE/config.toml"
         sed -i "s|SyncFromHash = .*|SyncFromHash = \"${CELESTIA_SYNC_FROM_HASH}\"|" "$CELESTIA_STORE/config.toml"
     fi
+else
+    warn "Celestia already has data, keeping existing sync config."
 fi
 
 # Extract auth token
@@ -281,16 +283,18 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='svm'" | grep
 log "PostgreSQL configured (database: svm). Tables will be created by svm-rollup migrations."
 
 # ---------------------------------------------------------------------------
-# Step 9: Generate config.toml
+# Step 9: Generate config.toml (skip if it already exists)
 # ---------------------------------------------------------------------------
-log "Generating config.toml..."
 cd "$USER_HOME/svm-rollup"
 
-# Download template
-curl -fsSL "${REPO_URL}/config.toml.template" -o /tmp/config.toml.template 2>/dev/null || true
+if [[ ! -f "$USER_HOME/svm-rollup/config.toml" ]]; then
+    log "Generating config.toml..."
 
-# If curl failed (no internet or repo not public yet), use embedded template
-if [[ ! -f /tmp/config.toml.template || ! -s /tmp/config.toml.template ]] || ! grep -q '\[da\]' /tmp/config.toml.template 2>/dev/null; then
+    # Download template
+    curl -fsSL "${REPO_URL}/config.toml.template" -o /tmp/config.toml.template 2>/dev/null || true
+
+    # If curl failed (no internet or repo not public yet), use embedded template
+    if [[ ! -f /tmp/config.toml.template || ! -s /tmp/config.toml.template ]] || ! grep -q '\[da\]' /tmp/config.toml.template 2>/dev/null; then
 cat > /tmp/config.toml.template << 'TMPL'
 [da]
 rpc_url = "ws://127.0.0.1:26658"
@@ -335,16 +339,19 @@ blob_processing_timeout_secs = 120
 
 [sequencer.standard]
 TMPL
+    fi
+
+    # Replace placeholders
+    sed -e "s|%%RPC_AUTH_TOKEN%%|${CELESTIA_AUTH_TOKEN}|g" \
+        -e "s|%%GRPC_URL%%|${CELESTIA_GRPC}|g" \
+        -e "s|%%SIGNER_PRIVATE_KEY%%|${SIGNER_KEY}|g" \
+        /tmp/config.toml.template > "$USER_HOME/svm-rollup/config.toml"
+
+    rm -f /tmp/config.toml.template
+    log "config.toml generated."
+else
+    warn "config.toml already exists, keeping existing configuration."
 fi
-
-# Replace placeholders
-sed -e "s|%%RPC_AUTH_TOKEN%%|${CELESTIA_AUTH_TOKEN}|g" \
-    -e "s|%%GRPC_URL%%|${CELESTIA_GRPC}|g" \
-    -e "s|%%SIGNER_PRIVATE_KEY%%|${SIGNER_KEY}|g" \
-    /tmp/config.toml.template > "$USER_HOME/svm-rollup/config.toml"
-
-rm -f /tmp/config.toml.template
-log "config.toml generated."
 
 # ---------------------------------------------------------------------------
 # Step 10: Install Python dependencies
@@ -477,6 +484,15 @@ install_service "solaxy-dashboard.service"
 sudo systemctl daemon-reload
 sudo systemctl enable celestia-light solaxy-node solaxy-dashboard
 
+# Allow the dashboard to manage services without a password prompt
+log "Configuring passwordless sudo for service management..."
+sudo tee /etc/sudoers.d/solaxy-dashboard > /dev/null << EOF
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start solaxy-node.service, /usr/bin/systemctl stop solaxy-node.service, /usr/bin/systemctl restart solaxy-node.service
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start celestia-light.service, /usr/bin/systemctl stop celestia-light.service, /usr/bin/systemctl restart celestia-light.service
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start solaxy-dashboard.service, /usr/bin/systemctl stop solaxy-dashboard.service, /usr/bin/systemctl restart solaxy-dashboard.service
+EOF
+sudo chmod 440 /etc/sudoers.d/solaxy-dashboard
+
 # ---------------------------------------------------------------------------
 # Step 14: Open firewall for dashboard
 # ---------------------------------------------------------------------------
@@ -493,11 +509,14 @@ else
     warn "No firewall tool (ufw/firewalld) found. Ensure port 5555 is accessible."
 fi
 
+# Start services (start is a no-op if already running; restart dashboard to pick up new files)
 sudo systemctl start celestia-light
-log "Waiting for Celestia to initialize..."
-sleep 15
+if ! systemctl is-active --quiet solaxy-node.service; then
+    log "Waiting for Celestia to initialize..."
+    sleep 15
+fi
 sudo systemctl start solaxy-node
-sudo systemctl start solaxy-dashboard
+sudo systemctl restart solaxy-dashboard
 
 # ---------------------------------------------------------------------------
 # Step 15: Print summary
