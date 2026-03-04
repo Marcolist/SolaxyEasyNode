@@ -49,6 +49,9 @@ SolaxyEasyNode reduces setup time and provides a production-ready dashboard + Te
 ### Telegram Bot
 ![Telegram Bot](screenshots/telegrambot.png)
 
+### Node Map
+![Network Map](screenshots/map.png)
+
 ## What Gets Installed
 
 | Component | Description |
