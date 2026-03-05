@@ -205,21 +205,27 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
     CELESTIA_SYNC_FROM_HEIGHT=$((GENESIS_DA_HEIGHT - 26000))
     log "Genesis DA height: $GENESIS_DA_HEIGHT — Celestia will sync from $CELESTIA_SYNC_FROM_HEIGHT"
 
-    # Check if the required blocks are still available (not pruned)
-    ESTIMATED_TAIL=$((CELESTIA_CURRENT_HEAD - (PRUNING_HOURS * 3600 / 11)))
+    # Check if the required blocks are still available on the Celestia network.
+    # Our local pruning window controls what we RETAIN after sync, but for the
+    # initial sync we depend on what other light/bridge nodes still have.
+    # Celestia light nodes typically keep ~7-9 days of blocks.  We use a
+    # conservative estimate of 8 days (~62,836 blocks at 11s/block) to decide
+    # whether the needed blocks are likely still available from network peers.
+    CELESTIA_NET_AVAIL_HOURS=192   # 8 days — conservative light-node availability
+    ESTIMATED_TAIL=$((CELESTIA_CURRENT_HEAD - (CELESTIA_NET_AVAIL_HOURS * 3600 / 11)))
     if [[ "$CELESTIA_SYNC_FROM_HEIGHT" -lt "$ESTIMATED_TAIL" ]]; then
         echo ""
         echo -e "${RED}============================================================${NC}"
         echo -e "${RED}  ERROR: State export is too old for the current network!${NC}"
         echo -e "${RED}============================================================${NC}"
         echo ""
-        echo -e "  Genesis DA Height:        ${YELLOW}${GENESIS_DA_HEIGHT}${NC}"
-        echo -e "  Required sync start:      ${YELLOW}${CELESTIA_SYNC_FROM_HEIGHT}${NC}"
-        echo -e "  Celestia tail (estimated): ${YELLOW}${ESTIMATED_TAIL}${NC}"
-        echo -e "  Celestia head:            ${CYAN}${CELESTIA_CURRENT_HEAD}${NC}"
-        echo -e "  Pruning window:           ${CYAN}${PRUNING_HOURS}h${NC}"
+        echo -e "  Genesis DA Height:              ${YELLOW}${GENESIS_DA_HEIGHT}${NC}"
+        echo -e "  Required sync start:            ${YELLOW}${CELESTIA_SYNC_FROM_HEIGHT}${NC}"
+        echo -e "  Celestia tail (estimated, ~8d):  ${YELLOW}${ESTIMATED_TAIL}${NC}"
+        echo -e "  Celestia head:                  ${CYAN}${CELESTIA_CURRENT_HEAD}${NC}"
         echo ""
-        echo -e "  The rollup needs Celestia blocks that have already been pruned."
+        echo -e "  The rollup needs Celestia blocks that have most likely already"
+        echo -e "  been pruned by light nodes on the network."
         echo -e "  Please ask Solaxy to provide an updated state export, or delete"
         echo -e "  the genesis/ directory and re-run this installer if a newer"
         echo -e "  version is available:"
