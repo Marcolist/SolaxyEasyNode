@@ -205,6 +205,31 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
     CELESTIA_SYNC_FROM_HEIGHT=$((GENESIS_DA_HEIGHT - 26000))
     log "Genesis DA height: $GENESIS_DA_HEIGHT — Celestia will sync from $CELESTIA_SYNC_FROM_HEIGHT"
 
+    # Check if the required blocks are still available (not pruned)
+    ESTIMATED_TAIL=$((CELESTIA_CURRENT_HEAD - (PRUNING_HOURS * 3600 / 11)))
+    if [[ "$CELESTIA_SYNC_FROM_HEIGHT" -lt "$ESTIMATED_TAIL" ]]; then
+        echo ""
+        echo -e "${RED}============================================================${NC}"
+        echo -e "${RED}  ERROR: State export is too old for the current network!${NC}"
+        echo -e "${RED}============================================================${NC}"
+        echo ""
+        echo -e "  Genesis DA Height:        ${YELLOW}${GENESIS_DA_HEIGHT}${NC}"
+        echo -e "  Required sync start:      ${YELLOW}${CELESTIA_SYNC_FROM_HEIGHT}${NC}"
+        echo -e "  Celestia tail (estimated): ${YELLOW}${ESTIMATED_TAIL}${NC}"
+        echo -e "  Celestia head:            ${CYAN}${CELESTIA_CURRENT_HEAD}${NC}"
+        echo -e "  Pruning window:           ${CYAN}${PRUNING_HOURS}h${NC}"
+        echo ""
+        echo -e "  The rollup needs Celestia blocks that have already been pruned."
+        echo -e "  Please ask Solaxy to provide an updated state export, or delete"
+        echo -e "  the genesis/ directory and re-run this installer if a newer"
+        echo -e "  version is available:"
+        echo ""
+        echo -e "    ${CYAN}rm -rf ~/svm-rollup/genesis/${NC}"
+        echo ""
+        echo -e "${RED}============================================================${NC}"
+        err "Cannot continue — state export too old."
+    fi
+
     # Fetch the block hash from Celestia consensus RPC
     CELESTIA_SYNC_FROM_HASH=$(curl -s "https://${CELESTIA_CORE_IP}/header?height=${CELESTIA_SYNC_FROM_HEIGHT}" \
         | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['header']['last_block_id']['hash'])" 2>/dev/null || true)
