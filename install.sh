@@ -32,6 +32,67 @@ warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 err()  { echo -e "${RED}[x]${NC} $*"; exit 1; }
 
 # ---------------------------------------------------------------------------
+# Helper: Check if remote file is newer than local file
+# ---------------------------------------------------------------------------
+# Usage: check_and_download <url> <local_path> <label>
+# Returns 0 if file is ready to use, 1 on error.
+check_and_download() {
+    local url="$1"
+    local local_path="$2"
+    local label="$3"
+
+    if [[ ! -f "$local_path" ]]; then
+        log "Downloading ${label}..."
+        curl -L# "$url" -o "$local_path"
+        return $?
+    fi
+
+    # File exists — check if remote version is newer
+    local local_epoch
+    local_epoch=$(stat -c %Y "$local_path" 2>/dev/null || echo 0)
+
+    local remote_date
+    remote_date=$(curl -sI "$url" 2>/dev/null | grep -i '^last-modified:' | sed 's/^[Ll]ast-[Mm]odified: *//' | tr -d '\r')
+
+    if [[ -z "$remote_date" ]]; then
+        warn "Could not check remote version of ${label}. Using local file."
+        return 0
+    fi
+
+    local remote_epoch
+    remote_epoch=$(date -d "$remote_date" +%s 2>/dev/null || echo 0)
+
+    if [[ "$remote_epoch" -gt "$local_epoch" ]]; then
+        local local_date
+        local_date=$(date -d "@$local_epoch" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "unknown")
+        local remote_pretty
+        remote_pretty=$(date -d "$remote_date" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "$remote_date")
+
+        echo ""
+        warn "${label} — a newer version is available!"
+        echo -e "    Local:  ${YELLOW}${local_date}${NC}"
+        echo -e "    Remote: ${GREEN}${remote_pretty}${NC}"
+        echo ""
+        read -rp "  Download newer version? [Y/n] " answer
+        case "${answer,,}" in
+            n|no)
+                log "Keeping local ${label}."
+                return 0
+                ;;
+            *)
+                log "Downloading newer ${label}..."
+                rm -f "$local_path"
+                curl -L# "$url" -o "$local_path"
+                return $?
+                ;;
+        esac
+    else
+        log "${label} is up to date, skipping download."
+        return 0
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------------------
 echo -e "${CYAN}"
@@ -87,16 +148,23 @@ log "Downloading svm-rollup..."
 mkdir -p "$USER_HOME/svm-rollup"
 cd "$USER_HOME/svm-rollup"
 
-if [[ ! -f "$USER_HOME/svm-rollup/svm-rollup" ]]; then
-    curl -L# https://download.solaxy.io/solaxy/svm-rollup.tar.gz -o svm-rollup.tar.gz
+SVM_TARBALL="$USER_HOME/svm-rollup/svm-rollup.tar.gz"
+SVM_URL="https://download.solaxy.io/solaxy/svm-rollup.tar.gz"
+
+# Use binary as age reference (tarball gets deleted after extraction)
+if [[ -f "$USER_HOME/svm-rollup/svm-rollup" && ! -f "$SVM_TARBALL" ]]; then
+    touch -r "$USER_HOME/svm-rollup/svm-rollup" "$SVM_TARBALL" 2>/dev/null || true
+fi
+
+check_and_download "$SVM_URL" "$SVM_TARBALL" "svm-rollup"
+
+if [[ -f "$SVM_TARBALL" ]]; then
     log "Extracting svm-rollup..."
-    pv svm-rollup.tar.gz | tar xzf - --strip-components=1 2>/dev/null || tar xzf svm-rollup.tar.gz --strip-components=1
-    rm -f svm-rollup.tar.gz
+    pv "$SVM_TARBALL" | tar xzf - --strip-components=1 2>/dev/null || tar xzf "$SVM_TARBALL" --strip-components=1
+    rm -f "$SVM_TARBALL"
     rm -f config.toml   # remove tar template; will be generated with correct values later
     chmod +x svm-rollup
     log "svm-rollup extracted."
-else
-    warn "svm-rollup binary already exists, skipping download."
 fi
 
 # ---------------------------------------------------------------------------
@@ -105,12 +173,10 @@ fi
 log "Downloading genesis state..."
 mkdir -p "$USER_HOME/svm-rollup/genesis"
 
-if [[ ! -f "$USER_HOME/svm-rollup/genesis/state_export.svmd" ]]; then
-    curl -L# https://download.solaxy.io/solaxy/state_export.svmd -o "$USER_HOME/svm-rollup/genesis/state_export.svmd"
-    log "Genesis state downloaded."
-else
-    warn "Genesis state already exists, skipping download."
-fi
+GENESIS_PATH="$USER_HOME/svm-rollup/genesis/state_export.svmd"
+GENESIS_URL="https://download.solaxy.io/solaxy/state_export.svmd"
+
+check_and_download "$GENESIS_URL" "$GENESIS_PATH" "genesis state (state_export.svmd)"
 
 # Read genesis DA height from chain_state_zk.json and derive Celestia sync start
 GENESIS_DA_HEIGHT=""
@@ -138,6 +204,37 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
     # Start syncing a few thousand blocks before genesis to have a margin
     CELESTIA_SYNC_FROM_HEIGHT=$((GENESIS_DA_HEIGHT - 26000))
     log "Genesis DA height: $GENESIS_DA_HEIGHT — Celestia will sync from $CELESTIA_SYNC_FROM_HEIGHT"
+
+    # Check if the required blocks are still available on the Celestia network.
+    # Our local pruning window controls what we RETAIN after sync, but for the
+    # initial sync we depend on what other light/bridge nodes still have.
+    # Celestia light nodes typically keep ~7-9 days of blocks.  We use a
+    # conservative estimate of 8 days (~62,836 blocks at 11s/block) to decide
+    # whether the needed blocks are likely still available from network peers.
+    CELESTIA_NET_AVAIL_HOURS=192   # 8 days — conservative light-node availability
+    ESTIMATED_TAIL=$((CELESTIA_CURRENT_HEAD - (CELESTIA_NET_AVAIL_HOURS * 3600 / 11)))
+    if [[ "$CELESTIA_SYNC_FROM_HEIGHT" -lt "$ESTIMATED_TAIL" ]]; then
+        echo ""
+        echo -e "${RED}============================================================${NC}"
+        echo -e "${RED}  ERROR: State export is too old for the current network!${NC}"
+        echo -e "${RED}============================================================${NC}"
+        echo ""
+        echo -e "  Genesis DA Height:              ${YELLOW}${GENESIS_DA_HEIGHT}${NC}"
+        echo -e "  Required sync start:            ${YELLOW}${CELESTIA_SYNC_FROM_HEIGHT}${NC}"
+        echo -e "  Celestia tail (estimated, ~8d):  ${YELLOW}${ESTIMATED_TAIL}${NC}"
+        echo -e "  Celestia head:                  ${CYAN}${CELESTIA_CURRENT_HEAD}${NC}"
+        echo ""
+        echo -e "  The rollup needs Celestia blocks that have most likely already"
+        echo -e "  been pruned by light nodes on the network."
+        echo -e "  Please ask Solaxy to provide an updated state export, or delete"
+        echo -e "  the genesis/ directory and re-run this installer if a newer"
+        echo -e "  version is available:"
+        echo ""
+        echo -e "    ${CYAN}rm -rf ~/svm-rollup/genesis/${NC}"
+        echo ""
+        echo -e "${RED}============================================================${NC}"
+        err "Cannot continue — state export too old."
+    fi
 
     # Fetch the block hash from Celestia consensus RPC
     CELESTIA_SYNC_FROM_HASH=$(curl -s "https://${CELESTIA_CORE_IP}/header?height=${CELESTIA_SYNC_FROM_HEIGHT}" \
