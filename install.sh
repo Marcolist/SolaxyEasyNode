@@ -142,18 +142,6 @@ sudo apt install -y build-essential cmake pkg-config libudev-dev \
     postgresql python3 python3-pip libpq-dev curl tar git jq pv
 
 # ---------------------------------------------------------------------------
-# Detect if this is a fresh install or an update of an existing node
-# ---------------------------------------------------------------------------
-IS_UPDATE=false
-if systemctl is-active --quiet solaxy-node.service 2>/dev/null; then
-    IS_UPDATE=true
-    log "Existing Solaxy node detected (service is running)."
-elif [[ -f "$USER_HOME/svm-rollup/svm-rollup" && -d "$USER_HOME/svm-rollup/genesis" ]]; then
-    IS_UPDATE=true
-    log "Existing Solaxy node detected (files present)."
-fi
-
-# ---------------------------------------------------------------------------
 # Step 2: Download svm-rollup
 # ---------------------------------------------------------------------------
 log "Downloading svm-rollup..."
@@ -171,47 +159,25 @@ fi
 check_and_download "$SVM_URL" "$SVM_TARBALL" "svm-rollup"
 
 if [[ -f "$SVM_TARBALL" && -s "$SVM_TARBALL" ]]; then
-    # Stop node before replacing binary
-    if $IS_UPDATE && systemctl is-active --quiet solaxy-node.service 2>/dev/null; then
-        log "Stopping solaxy-node for binary update..."
-        sudo systemctl stop solaxy-node.service
-    fi
-
-    # Preserve user config.toml across tar extraction
-    if [[ -f "$USER_HOME/svm-rollup/config.toml" ]]; then
-        cp "$USER_HOME/svm-rollup/config.toml" /tmp/_solaxy_config_backup.toml
-    fi
-
     log "Extracting svm-rollup..."
     pv "$SVM_TARBALL" | tar xzf - --strip-components=1 2>/dev/null || tar xzf "$SVM_TARBALL" --strip-components=1
     rm -f "$SVM_TARBALL"
     rm -f config.toml   # remove tar template; will be generated with correct values later
     chmod +x svm-rollup
-
-    # Restore user config
-    if [[ -f /tmp/_solaxy_config_backup.toml ]]; then
-        cp /tmp/_solaxy_config_backup.toml "$USER_HOME/svm-rollup/config.toml"
-        rm -f /tmp/_solaxy_config_backup.toml
-    fi
-
     log "svm-rollup extracted."
 fi
 
 # ---------------------------------------------------------------------------
 # Step 3: Download genesis
 # ---------------------------------------------------------------------------
+log "Downloading genesis state..."
+mkdir -p "$USER_HOME/svm-rollup/genesis"
+
 GENESIS_PATH="$USER_HOME/svm-rollup/genesis/state_export.svmd"
 GENESIS_URL="https://download.solaxy.io/solaxy/state_export.svmd"
 GENESIS_FALLBACK_URL="https://map.orbitnode.dev/state/genesis.tar.gz"
 
-if $IS_UPDATE && [[ -f "$GENESIS_PATH" ]]; then
-    log "Existing genesis found — skipping download to protect DB state."
-    log "  (To force a genesis update, delete $GENESIS_PATH and re-run.)"
-else
-    log "Downloading genesis state..."
-    mkdir -p "$USER_HOME/svm-rollup/genesis"
-    check_and_download "$GENESIS_URL" "$GENESIS_PATH" "genesis state (state_export.svmd)"
-fi
+check_and_download "$GENESIS_URL" "$GENESIS_PATH" "genesis state (state_export.svmd)"
 
 # Read genesis DA height from chain_state_zk.json and derive Celestia sync start
 GENESIS_DA_HEIGHT=""
@@ -697,23 +663,13 @@ else
     warn "No firewall tool (ufw/firewalld) found. Ensure port 5555 is accessible."
 fi
 
-# Start services
+# Start services (start is a no-op if already running; restart dashboard to pick up new files)
 sudo systemctl start celestia-light
 if ! systemctl is-active --quiet solaxy-node.service; then
     log "Waiting for Celestia to initialize..."
     sleep 15
-    sudo systemctl start solaxy-node
-elif $IS_UPDATE; then
-    # Only restart if binary was actually updated (service was stopped earlier)
-    if ! systemctl is-active --quiet solaxy-node.service; then
-        log "Restarting solaxy-node after binary update..."
-        sudo systemctl start solaxy-node
-    else
-        log "solaxy-node still running — no restart needed."
-    fi
-else
-    sudo systemctl start solaxy-node
 fi
+sudo systemctl start solaxy-node
 sudo systemctl restart solaxy-dashboard
 
 # ---------------------------------------------------------------------------
@@ -721,11 +677,7 @@ sudo systemctl restart solaxy-dashboard
 # ---------------------------------------------------------------------------
 echo ""
 echo -e "${CYAN}============================================================${NC}"
-if $IS_UPDATE; then
-    echo -e "${GREEN}  SolaxyEasyNode Update Complete!${NC}"
-else
-    echo -e "${GREEN}  SolaxyEasyNode Installation Complete!${NC}"
-fi
+echo -e "${GREEN}  SolaxyEasyNode Installation Complete!${NC}"
 echo -e "${CYAN}============================================================${NC}"
 echo ""
 
