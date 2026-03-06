@@ -231,13 +231,7 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
         echo -e "  ${YELLOW}Note: This is NOT an official Solaxy download.${NC}"
         echo -e "  It is maintained by the SolaxyEasyNode community."
         echo ""
-        read -rp "  Download genesis from community fallback server? [y/N] " answer
-        case "${answer,,}" in
-            y|yes) ;;
-            *)
-                err "Cannot continue — official state export too old and fallback declined."
-                ;;
-        esac
+        echo -e "  ${GREEN}Automatically downloading from community fallback server...${NC}"
 
         rm -rf "$USER_HOME/svm-rollup/genesis"
         mkdir -p "$USER_HOME/svm-rollup/genesis"
