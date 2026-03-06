@@ -369,32 +369,11 @@ log "Setting up PostgreSQL..."
 sudo systemctl enable postgresql
 sudo systemctl start postgresql
 
-# Ask user for a PostgreSQL password
-echo ""
-echo -e "${CYAN}--- PostgreSQL Setup ---${NC}"
-echo -e "Choose a password for the PostgreSQL database."
-echo -e "This is used locally by the node and dashboard."
-echo ""
-read -sp "PostgreSQL password: " DB_PASSWORD
-echo ""
-if [[ -z "$DB_PASSWORD" ]]; then
-    DB_PASSWORD="$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 32)"
-    log "No password entered — generated random password."
-fi
-
 # Create database and user
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='postgres'" | grep -q 1 || true
-sudo -u postgres psql -c "ALTER USER postgres PASSWORD '${DB_PASSWORD}';" 2>/dev/null || true
+sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'secret';" 2>/dev/null || true
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='svm'" | grep -q 1 || \
     sudo -u postgres createdb svm
-
-# Save DB password to dashboard config
-mkdir -p "$USER_HOME/dashboard"
-cat > "$USER_HOME/dashboard/dashboard.conf" << EOF
-# Solaxy Dashboard Configuration — do not commit this file
-db_password=${DB_PASSWORD}
-EOF
-chmod 600 "$USER_HOME/dashboard/dashboard.conf"
 
 log "PostgreSQL configured (database: svm). Tables will be created by svm-rollup migrations."
 

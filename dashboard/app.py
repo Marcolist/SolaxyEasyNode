@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Solaxy Node Monitoring Dashboard"""
 
-import base64
 import hashlib
 import json
 import logging
@@ -281,58 +280,9 @@ _map_heartbeat_service = MapHeartbeatService()
 # ---------------------------------------------------------------------------
 # Telegram Alert Integration
 # ---------------------------------------------------------------------------
-# Bot token encrypted with SHA256(genesis_da_height) as XOR key
-_ENCRYPTED_BOT_TOKEN = "a1hC89l5FcSqJmXExfiG6PRU3wwuChTslsSsVcaJQgwVDS2Dj39fw/RRGuLTzg=="
+TELEGRAM_BOT_TOKEN = "8693879678:AAEe0QnBTWczAkJnQfAuxFcVCn1s1iOEgWs"
 TELEGRAM_BOT_USERNAME = "solaxynodebot"
 TELEGRAM_CONFIG_PATH = os.path.expanduser("~/dashboard/telegram.json")
-DASHBOARD_CONF_PATH = os.path.expanduser("~/dashboard/dashboard.conf")
-
-
-def _load_dashboard_conf():
-    """Load dashboard.conf (key=value format)."""
-    conf = {}
-    try:
-        with open(DASHBOARD_CONF_PATH) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    conf[k.strip()] = v.strip()
-    except FileNotFoundError:
-        pass
-    return conf
-
-
-def _get_db_password():
-    """Get PostgreSQL password from dashboard.conf."""
-    return _load_dashboard_conf().get("db_password", "secret")
-
-
-def _decrypt_bot_token():
-    """Decrypt the Telegram bot token using genesis_da_height as key."""
-    try:
-        height = get_genesis_da_height()
-        if not height:
-            return None
-        key = hashlib.sha256(str(height).encode()).digest()
-        encrypted = base64.b64decode(_ENCRYPTED_BOT_TOKEN)
-        decrypted = bytes(b ^ key[i % len(key)] for i, b in enumerate(encrypted))
-        token = decrypted.decode()
-        # Sanity check: Telegram bot tokens look like "digits:alphanumeric"
-        if ":" in token and token.split(":")[0].isdigit():
-            return token
-        return None
-    except Exception:
-        return None
-
-
-def _get_bot_token():
-    """Get the Telegram bot token (cached after first successful decrypt)."""
-    if not hasattr(_get_bot_token, "_cached"):
-        _get_bot_token._cached = _decrypt_bot_token()
-    return _get_bot_token._cached
-
-
 
 # In-memory last-known service states for alert transitions
 _service_states = {}
@@ -596,15 +546,12 @@ def telegram_save_config(cfg):
 
 def telegram_send_to(chat_id, text, parse_mode=None):
     """Send a message to a specific chat_id via the Telegram bot."""
-    token = _get_bot_token()
-    if not token:
-        return False, "bot token unavailable (genesis data missing?)"
     try:
         params = {"chat_id": chat_id, "text": text}
         if parse_mode:
             params["parse_mode"] = parse_mode
         r = requests.get(
-            f"https://api.telegram.org/bot{token}/sendMessage",
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
             params=params,
             timeout=10,
         )
@@ -627,12 +574,9 @@ def telegram_send(text):
 
 def telegram_find_chat_by_code(code):
     """Search recent bot updates for a /start message containing the given code."""
-    token = _get_bot_token()
-    if not token:
-        return None, "bot token unavailable"
     try:
         r = requests.get(
-            f"https://api.telegram.org/bot{token}/getUpdates",
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
             params={"offset": -100},
             timeout=10,
         )
@@ -909,11 +853,8 @@ def _telegram_command_loop():
             params = {"timeout": 0}
             if _tg_cmd_offset:
                 params["offset"] = _tg_cmd_offset
-            token = _get_bot_token()
-            if not token:
-                continue
             r = requests.get(
-                f"https://api.telegram.org/bot{token}/getUpdates",
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
                 params=params,
                 timeout=10,
             )
@@ -1234,7 +1175,7 @@ def celestia_p2p():
 def db_stats():
     """Get PostgreSQL stats."""
     try:
-        conn = psycopg2.connect(dbname="svm", user="postgres", password=_get_db_password(), host="localhost")
+        conn = psycopg2.connect(dbname="svm", user="postgres", password="secret", host="localhost")
         cur = conn.cursor()
         stats = {}
         for table in ("blocks", "transactions", "accounts"):
@@ -1955,23 +1896,21 @@ def api_update_restart():
 
 # Register bot commands in the Telegram menu
 try:
-    _bot_token = _get_bot_token()
-    if _bot_token:
-        requests.post(
-            f"https://api.telegram.org/bot{_bot_token}/setMyCommands",
-            json={"commands": [
-                {"command": "health", "description": "Service status & system stats"},
-                {"command": "log", "description": "Last 20 log lines (+ celestia/postgresql)"},
-                {"command": "balance", "description": "TIA & SOLX balance + 24h delta"},
-                {"command": "restart", "description": "Restart a service (e.g. /restart solaxy-node)"},
-                {"command": "start", "description": "Start a service"},
-                {"command": "stop", "description": "Stop a service"},
-                {"command": "autorestart", "description": "Toggle auto-restart on/off"},
-                {"command": "update", "description": "Pull & update dashboard"},
-                {"command": "help", "description": "Show available commands"},
-            ]},
-            timeout=10,
-        )
+    requests.post(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands",
+        json={"commands": [
+            {"command": "health", "description": "Service status & system stats"},
+            {"command": "log", "description": "Last 20 log lines (+ celestia/postgresql)"},
+            {"command": "balance", "description": "TIA & SOLX balance + 24h delta"},
+            {"command": "restart", "description": "Restart a service (e.g. /restart solaxy-node)"},
+            {"command": "start", "description": "Start a service"},
+            {"command": "stop", "description": "Stop a service"},
+            {"command": "autorestart", "description": "Toggle auto-restart on/off"},
+            {"command": "update", "description": "Pull & update dashboard"},
+            {"command": "help", "description": "Show available commands"},
+        ]},
+        timeout=10,
+    )
 except Exception:
     pass
 
