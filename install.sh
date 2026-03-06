@@ -204,12 +204,48 @@ GENESIS_PATH="$USER_HOME/svm-rollup/genesis/state_export.svmd"
 GENESIS_URL="https://download.solaxy.io/solaxy/state_export.svmd"
 GENESIS_FALLBACK_URL="https://map.orbitnode.dev/state/genesis.tar.gz"
 
+mkdir -p "$USER_HOME/svm-rollup/genesis"
+
 if $IS_UPDATE && [[ -f "$GENESIS_PATH" ]]; then
-    log "Existing genesis found — skipping download to protect DB state."
-    log "  (To force a genesis update, delete $GENESIS_PATH and re-run.)"
+    # Existing genesis — download to temp and compare checksums before replacing.
+    # Replacing with the same file would give it a new timestamp and cause
+    # svm-rollup to re-import genesis, wiping the PostgreSQL transaction history.
+    log "Checking for newer genesis state..."
+    GENESIS_TMP="${GENESIS_PATH}.new"
+    OLD_HASH=$(sha256sum "$GENESIS_PATH" 2>/dev/null | awk '{print $1}')
+
+    if curl -fL# "$GENESIS_URL" -o "$GENESIS_TMP" 2>/dev/null; then
+        NEW_HASH=$(sha256sum "$GENESIS_TMP" 2>/dev/null | awk '{print $1}')
+        if [[ "$OLD_HASH" == "$NEW_HASH" ]]; then
+            log "Genesis is identical — keeping existing file (DB state preserved)."
+            rm -f "$GENESIS_TMP"
+        else
+            echo ""
+            warn "A different genesis state is available on the server!"
+            echo -e "    Local:  ${YELLOW}${OLD_HASH:0:16}...${NC}"
+            echo -e "    Remote: ${GREEN}${NEW_HASH:0:16}...${NC}"
+            echo ""
+            echo -e "    ${YELLOW}Replacing genesis will cause svm-rollup to re-import,"
+            echo -e "    which resets transactions and accounts in the DB.${NC}"
+            echo ""
+            read -rp "  Replace genesis with newer version? [y/N] " answer </dev/tty
+            case "${answer,,}" in
+                y|yes)
+                    mv -f "$GENESIS_TMP" "$GENESIS_PATH"
+                    log "Genesis updated."
+                    ;;
+                *)
+                    log "Keeping existing genesis (DB state preserved)."
+                    rm -f "$GENESIS_TMP"
+                    ;;
+            esac
+        fi
+    else
+        warn "Could not download genesis for comparison. Keeping existing file."
+        rm -f "$GENESIS_TMP"
+    fi
 else
     log "Downloading genesis state..."
-    mkdir -p "$USER_HOME/svm-rollup/genesis"
     check_and_download "$GENESIS_URL" "$GENESIS_PATH" "genesis state (state_export.svmd)"
 fi
 
