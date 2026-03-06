@@ -173,39 +173,11 @@ fi
 log "Downloading genesis state..."
 mkdir -p "$USER_HOME/svm-rollup/genesis"
 
-GENESIS_ARCHIVE_URL="https://map.orbitnode.dev/state/genesis.tar.gz"
 GENESIS_PATH="$USER_HOME/svm-rollup/genesis/state_export.svmd"
+GENESIS_URL="https://download.solaxy.io/solaxy/state_export.svmd"
+GENESIS_FALLBACK_URL="https://map.orbitnode.dev/state/genesis.tar.gz"
 
-if [[ ! -f "$GENESIS_PATH" ]]; then
-    log "Downloading and extracting genesis archive..."
-    curl -L# "$GENESIS_ARCHIVE_URL" | tar xzf - -C "$USER_HOME/svm-rollup/"
-    log "Genesis state extracted."
-else
-    # Check if remote version is newer using Last-Modified header
-    local_epoch=$(stat -c %Y "$GENESIS_PATH" 2>/dev/null || echo 0)
-    remote_date=$(curl -sI "$GENESIS_ARCHIVE_URL" 2>/dev/null | grep -i '^last-modified:' | sed 's/^[Ll]ast-[Mm]odified: *//' | tr -d '\r')
-    if [[ -n "$remote_date" ]]; then
-        remote_epoch=$(date -d "$remote_date" +%s 2>/dev/null || echo 0)
-        if [[ "$remote_epoch" -gt "$local_epoch" ]]; then
-            warn "Newer genesis state available!"
-            read -rp "  Download newer version? [Y/n] " answer
-            case "${answer,,}" in
-                n|no) log "Keeping local genesis state." ;;
-                *)
-                    log "Downloading and extracting newer genesis archive..."
-                    rm -rf "$USER_HOME/svm-rollup/genesis"
-                    mkdir -p "$USER_HOME/svm-rollup/genesis"
-                    curl -L# "$GENESIS_ARCHIVE_URL" | tar xzf - -C "$USER_HOME/svm-rollup/"
-                    log "Genesis state updated."
-                    ;;
-            esac
-        else
-            log "Genesis state is up to date, skipping download."
-        fi
-    else
-        warn "Could not check remote genesis version. Using local files."
-    fi
-fi
+check_and_download "$GENESIS_URL" "$GENESIS_PATH" "genesis state (state_export.svmd)"
 
 # Read genesis DA height from chain_state_zk.json and derive Celestia sync start
 GENESIS_DA_HEIGHT=""
@@ -244,25 +216,67 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
     ESTIMATED_TAIL=$((CELESTIA_CURRENT_HEAD - (CELESTIA_NET_AVAIL_HOURS * 3600 / 11)))
     if [[ "$CELESTIA_SYNC_FROM_HEIGHT" -lt "$ESTIMATED_TAIL" ]]; then
         echo ""
-        echo -e "${RED}============================================================${NC}"
-        echo -e "${RED}  ERROR: State export is too old for the current network!${NC}"
-        echo -e "${RED}============================================================${NC}"
+        echo -e "${YELLOW}============================================================${NC}"
+        echo -e "${YELLOW}  WARNING: Solaxy state export is too old!${NC}"
+        echo -e "${YELLOW}============================================================${NC}"
         echo ""
         echo -e "  Genesis DA Height:              ${YELLOW}${GENESIS_DA_HEIGHT}${NC}"
         echo -e "  Required sync start:            ${YELLOW}${CELESTIA_SYNC_FROM_HEIGHT}${NC}"
         echo -e "  Celestia tail (estimated, ~8d):  ${YELLOW}${ESTIMATED_TAIL}${NC}"
         echo -e "  Celestia head:                  ${CYAN}${CELESTIA_CURRENT_HEAD}${NC}"
         echo ""
-        echo -e "  The rollup needs Celestia blocks that have most likely already"
-        echo -e "  been pruned by light nodes on the network."
-        echo -e "  Please ask Solaxy to provide an updated state export, or delete"
-        echo -e "  the genesis/ directory and re-run this installer if a newer"
-        echo -e "  version is available:"
+        echo -e "  A community-hosted fallback genesis is available at:"
+        echo -e "  ${CYAN}${GENESIS_FALLBACK_URL}${NC}"
         echo ""
-        echo -e "    ${CYAN}rm -rf ~/svm-rollup/genesis/${NC}"
+        echo -e "  ${YELLOW}Note: This is NOT an official Solaxy download.${NC}"
+        echo -e "  It is maintained by the SolaxyEasyNode community."
         echo ""
-        echo -e "${RED}============================================================${NC}"
-        err "Cannot continue — state export too old."
+        read -rp "  Download genesis from community fallback server? [y/N] " answer
+        case "${answer,,}" in
+            y|yes) ;;
+            *)
+                err "Cannot continue — official state export too old and fallback declined."
+                ;;
+        esac
+
+        rm -rf "$USER_HOME/svm-rollup/genesis"
+        mkdir -p "$USER_HOME/svm-rollup/genesis"
+
+        log "Downloading genesis from fallback server..."
+        if curl -fL# "$GENESIS_FALLBACK_URL" | tar xzf - -C "$USER_HOME/svm-rollup/"; then
+            log "Fallback genesis downloaded and extracted."
+
+            # Re-read genesis DA height from the new files
+            if [[ -f "$CHAIN_STATE_FILE" ]]; then
+                GENESIS_DA_HEIGHT=$(python3 -c "import json; print(json.load(open('$CHAIN_STATE_FILE')).get('genesis_da_height', ''))" 2>/dev/null || true)
+            fi
+
+            if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
+                CELESTIA_SYNC_FROM_HEIGHT=$((GENESIS_DA_HEIGHT - 26000))
+                BLOCK_DIFF=$((CELESTIA_CURRENT_HEAD - GENESIS_DA_HEIGHT))
+                PRUNING_HOURS=$(( (BLOCK_DIFF * 11 / 3600) + 48 ))
+                if [[ $PRUNING_HOURS -lt 720 ]]; then PRUNING_HOURS=720; fi
+                CELESTIA_PRUNING_WINDOW="${PRUNING_HOURS}h0m0s"
+                log "Updated genesis DA height: $GENESIS_DA_HEIGHT — Celestia will sync from $CELESTIA_SYNC_FROM_HEIGHT"
+
+                # Re-check if the fallback genesis is also too old
+                ESTIMATED_TAIL=$((CELESTIA_CURRENT_HEAD - (CELESTIA_NET_AVAIL_HOURS * 3600 / 11)))
+                if [[ "$CELESTIA_SYNC_FROM_HEIGHT" -lt "$ESTIMATED_TAIL" ]]; then
+                    err "Fallback genesis is also too old. Cannot continue."
+                fi
+            else
+                err "Could not read genesis_da_height from fallback genesis."
+            fi
+        else
+            echo ""
+            echo -e "${RED}============================================================${NC}"
+            echo -e "${RED}  Fallback download failed!${NC}"
+            echo -e "${RED}============================================================${NC}"
+            echo -e "  Neither Solaxy nor the fallback server have a usable genesis."
+            echo -e "  Please try again later or contact the community for help."
+            echo -e "${RED}============================================================${NC}"
+            err "Cannot continue — no usable state export available."
+        fi
     fi
 
     # Fetch the block hash from Celestia consensus RPC
