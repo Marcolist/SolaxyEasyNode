@@ -62,7 +62,7 @@ check_and_download() {
     local remote_epoch
     remote_epoch=$(date -d "$remote_date" +%s 2>/dev/null || echo 0)
 
-    if [[ "$remote_epoch" -gt "$local_epoch" ]]; then
+    if [[ "$remote_epoch" -gt $((local_epoch + 60)) ]]; then
         local local_date
         local_date=$(date -d "@$local_epoch" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "unknown")
         local remote_pretty
