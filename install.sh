@@ -173,10 +173,39 @@ fi
 log "Downloading genesis state..."
 mkdir -p "$USER_HOME/svm-rollup/genesis"
 
+GENESIS_ARCHIVE_URL="https://map.orbitnode.dev/state/genesis.tar.gz"
 GENESIS_PATH="$USER_HOME/svm-rollup/genesis/state_export.svmd"
-GENESIS_URL="https://download.solaxy.io/solaxy/state_export.svmd"
 
-check_and_download "$GENESIS_URL" "$GENESIS_PATH" "genesis state (state_export.svmd)"
+if [[ ! -f "$GENESIS_PATH" ]]; then
+    log "Downloading and extracting genesis archive..."
+    curl -L# "$GENESIS_ARCHIVE_URL" | tar xzf - -C "$USER_HOME/svm-rollup/"
+    log "Genesis state extracted."
+else
+    # Check if remote version is newer using Last-Modified header
+    local_epoch=$(stat -c %Y "$GENESIS_PATH" 2>/dev/null || echo 0)
+    remote_date=$(curl -sI "$GENESIS_ARCHIVE_URL" 2>/dev/null | grep -i '^last-modified:' | sed 's/^[Ll]ast-[Mm]odified: *//' | tr -d '\r')
+    if [[ -n "$remote_date" ]]; then
+        remote_epoch=$(date -d "$remote_date" +%s 2>/dev/null || echo 0)
+        if [[ "$remote_epoch" -gt "$local_epoch" ]]; then
+            warn "Newer genesis state available!"
+            read -rp "  Download newer version? [Y/n] " answer
+            case "${answer,,}" in
+                n|no) log "Keeping local genesis state." ;;
+                *)
+                    log "Downloading and extracting newer genesis archive..."
+                    rm -rf "$USER_HOME/svm-rollup/genesis"
+                    mkdir -p "$USER_HOME/svm-rollup/genesis"
+                    curl -L# "$GENESIS_ARCHIVE_URL" | tar xzf - -C "$USER_HOME/svm-rollup/"
+                    log "Genesis state updated."
+                    ;;
+            esac
+        else
+            log "Genesis state is up to date, skipping download."
+        fi
+    else
+        warn "Could not check remote genesis version. Using local files."
+    fi
+fi
 
 # Read genesis DA height from chain_state_zk.json and derive Celestia sync start
 GENESIS_DA_HEIGHT=""
