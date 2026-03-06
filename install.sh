@@ -241,8 +241,22 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
         rm -rf "$USER_HOME/svm-rollup/genesis"
         mkdir -p "$USER_HOME/svm-rollup/genesis"
 
+        FALLBACK_TMP="$USER_HOME/svm-rollup/genesis_fallback.tar.gz"
+        rm -f "$FALLBACK_TMP"
+
         log "Downloading genesis from fallback server..."
-        if curl -fL# "$GENESIS_FALLBACK_URL" | tar xzf - -C "$USER_HOME/svm-rollup/"; then
+        FALLBACK_OK=false
+        for attempt in 1 2 3 4; do
+            if curl -fL# --retry 3 --retry-delay 2 -C - -o "$FALLBACK_TMP" "$GENESIS_FALLBACK_URL"; then
+                FALLBACK_OK=true
+                break
+            fi
+            warn "Download attempt $attempt failed, retrying in $((attempt * 2))s..."
+            sleep $((attempt * 2))
+        done
+
+        if $FALLBACK_OK && tar xzf "$FALLBACK_TMP" -C "$USER_HOME/svm-rollup/"; then
+            rm -f "$FALLBACK_TMP"
             log "Fallback genesis downloaded and extracted."
 
             # Re-read genesis DA height from the new files
@@ -267,6 +281,7 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
                 err "Could not read genesis_da_height from fallback genesis."
             fi
         else
+            rm -f "$FALLBACK_TMP"
             echo ""
             echo -e "${RED}============================================================${NC}"
             echo -e "${RED}  Fallback download failed!${NC}"
