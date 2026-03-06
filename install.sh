@@ -158,7 +158,7 @@ fi
 
 check_and_download "$SVM_URL" "$SVM_TARBALL" "svm-rollup"
 
-if [[ -f "$SVM_TARBALL" ]]; then
+if [[ -f "$SVM_TARBALL" && -s "$SVM_TARBALL" ]]; then
     log "Extracting svm-rollup..."
     pv "$SVM_TARBALL" | tar xzf - --strip-components=1 2>/dev/null || tar xzf "$SVM_TARBALL" --strip-components=1
     rm -f "$SVM_TARBALL"
