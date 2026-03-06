@@ -73,7 +73,7 @@ check_and_download() {
         echo -e "    Local:  ${YELLOW}${local_date}${NC}"
         echo -e "    Remote: ${GREEN}${remote_pretty}${NC}"
         echo ""
-        read -rp "  Download newer version? [Y/n] " answer
+        read -rp "  Download newer version? [Y/n] " answer </dev/tty
         case "${answer,,}" in
             n|no)
                 log "Keeping local ${label}."
@@ -231,10 +231,9 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
         echo -e "  ${YELLOW}Note: This is NOT an official Solaxy download.${NC}"
         echo -e "  It is maintained by the SolaxyEasyNode community."
         echo ""
-        read -rp "  Download genesis from community fallback server? [y/N] " answer
+        read -rp "  Download genesis from community fallback server? [Y/n] " answer </dev/tty
         case "${answer,,}" in
-            y|yes) ;;
-            *)
+            n|no)
                 err "Cannot continue — official state export too old and fallback declined."
                 ;;
         esac
