@@ -151,9 +151,35 @@ cd "$USER_HOME/svm-rollup"
 SVM_TARBALL="$USER_HOME/svm-rollup/svm-rollup.tar.gz"
 SVM_URL="https://download.solaxy.io/solaxy/svm-rollup.tar.gz"
 
-# Use binary as age reference (tarball gets deleted after extraction)
-if [[ -f "$USER_HOME/svm-rollup/svm-rollup" && ! -f "$SVM_TARBALL" ]]; then
-    touch -r "$USER_HOME/svm-rollup/svm-rollup" "$SVM_TARBALL" 2>/dev/null || true
+# Required genesis files shipped inside the tarball
+GENESIS_JSON_FILES=(
+    "genesis/bank.json"
+    "genesis/sequencer_registry.json"
+    "genesis/accounts.json"
+    "genesis/attester_incentives.json"
+    "genesis/prover_incentives.json"
+    "genesis/operator_incentives.json"
+    "genesis/chain_state_zk.json"
+    "genesis/svm.json"
+)
+
+# If any genesis file is missing, force a fresh download regardless of age
+GENESIS_MISSING=false
+for gf in "${GENESIS_JSON_FILES[@]}"; do
+    if [[ ! -f "$USER_HOME/svm-rollup/$gf" ]]; then
+        warn "Missing $gf — forcing re-download of svm-rollup archive."
+        GENESIS_MISSING=true
+        break
+    fi
+done
+
+if $GENESIS_MISSING; then
+    rm -f "$SVM_TARBALL"
+else
+    # Use binary as age reference (tarball gets deleted after extraction)
+    if [[ -f "$USER_HOME/svm-rollup/svm-rollup" && ! -f "$SVM_TARBALL" ]]; then
+        touch -r "$USER_HOME/svm-rollup/svm-rollup" "$SVM_TARBALL" 2>/dev/null || true
+    fi
 fi
 
 check_and_download "$SVM_URL" "$SVM_TARBALL" "svm-rollup"
@@ -166,6 +192,13 @@ if [[ -f "$SVM_TARBALL" && -s "$SVM_TARBALL" ]]; then
     chmod +x svm-rollup
     log "svm-rollup extracted."
 fi
+
+# Verify all genesis files are present
+for gf in "${GENESIS_JSON_FILES[@]}"; do
+    if [[ ! -f "$USER_HOME/svm-rollup/$gf" ]]; then
+        err "Genesis file $gf missing after extraction. The svm-rollup.tar.gz archive may be incomplete or the download failed."
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # Step 3: Download genesis
