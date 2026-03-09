@@ -467,6 +467,15 @@ sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'secret';" 2>/dev/null ||
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='svm'" | grep -q 1 || \
     sudo -u postgres createdb svm
 
+# Ensure local TCP connections use md5 auth (password) so DATABASE_URL works
+PG_HBA=$(sudo -u postgres psql -t -P format=unaligned -c 'SHOW hba_file' 2>/dev/null | tr -d ' ')
+if [[ -n "$PG_HBA" && -f "$PG_HBA" ]]; then
+    # Replace 'peer' with 'md5' for local IPv4 connections to allow password auth
+    sudo sed -i 's/^\(host\s\+all\s\+all\s\+127\.0\.0\.1\/32\s\+\)peer/\1md5/' "$PG_HBA"
+    sudo sed -i 's/^\(host\s\+all\s\+all\s\+127\.0\.0\.1\/32\s\+\)ident/\1md5/' "$PG_HBA"
+    sudo systemctl reload postgresql 2>/dev/null || true
+fi
+
 log "PostgreSQL configured (database: svm). Tables will be created by svm-rollup migrations."
 
 # ---------------------------------------------------------------------------
@@ -608,6 +617,8 @@ User=${USER_NAME}
 Type=simple
 WorkingDirectory=${USER_HOME}/svm-rollup
 Environment=SOV_PROVER_MODE=skip
+Environment=RUST_LOG=info
+Environment=DATABASE_URL=postgresql://postgres:secret@localhost:5432/svm
 ExecStart=${USER_HOME}/svm-rollup/svm-rollup --da-layer celestia --rollup-config-path config.toml --genesis-config-dir genesis
 Restart=on-failure
 RestartSec=15
