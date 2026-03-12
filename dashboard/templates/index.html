@@ -513,17 +513,43 @@ canvas.sparkline{vertical-align:middle}
     <div class="cfg-field"><label>Telegraf Address</label><input type="text" id="cfg_monitoring_telegraf_address"></div>
   </div>
 
+  <h4>Reward Wallet</h4>
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="radio" name="rewardMode" value="default" id="rewardModeDefault" onchange="updateRewardMode()" checked>
+        <span style="font-size:12px">Solaxy Default Prover</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="radio" name="rewardMode" value="own" id="rewardModeOwn" onchange="updateRewardMode()">
+        <span style="font-size:12px">Own Wallet (Rewards)</span>
+      </label>
+    </div>
+    <div id="rewardDefaultInfo" style="font-size:11px;color:#8b949e">
+      Using the Solaxy team prover address. No bond required, no individual rewards.
+    </div>
+    <div id="rewardOwnInfo" style="display:none">
+      <div style="font-size:11px;color:#d29922;margin-bottom:6px">
+        &#9888; Using your own wallet enables reward eligibility. When validator registration opens, the node will automatically post the required bond from this wallet. Ensure it is funded with sufficient SOLX beforehand (min. 1,000 SOLX for Prover).
+      </div>
+      <div style="font-size:11px;color:#8b949e;margin-bottom:8px">
+        Address from your node wallet (<code>node-wallet.json</code>):
+      </div>
+      <div style="font-size:11px;color:#58a6ff;word-break:break-all;font-family:monospace" id="rewardOwnAddress">-</div>
+    </div>
+  </div>
+
   <h4>Proof Manager</h4>
   <div class="cfg-grid">
     <div class="cfg-field"><label>Aggregated Proof Block Jump</label><input type="number" id="cfg_proof_manager_aggregated_proof_block_jump"></div>
-    <div class="cfg-field"><label>Prover Address</label><input type="text" id="cfg_proof_manager_prover_address"></div>
+    <div class="cfg-field"><label>Prover Address</label><input type="text" id="cfg_proof_manager_prover_address" readonly style="opacity:0.6"></div>
     <div class="cfg-field"><label>Max Transitions in DB</label><input type="number" id="cfg_proof_manager_max_number_of_transitions_in_db"></div>
     <div class="cfg-field"><label>Max Transitions in Memory</label><input type="number" id="cfg_proof_manager_max_number_of_transitions_in_memory"></div>
   </div>
 
   <h4>Sequencer</h4>
   <div class="cfg-grid">
-    <div class="cfg-field"><label>Rollup Address</label><input type="text" id="cfg_sequencer_rollup_address"></div>
+    <div class="cfg-field"><label>Rollup Address</label><input type="text" id="cfg_sequencer_rollup_address" readonly style="opacity:0.6"></div>
     <div class="cfg-field"><label>Max Allowed Node Distance Behind</label><input type="number" id="cfg_sequencer_max_allowed_node_distance_behind"></div>
     <div class="cfg-field"><label>Max Concurrent Blobs</label><input type="number" id="cfg_sequencer_max_concurrent_blobs"></div>
     <div class="cfg-field"><label>Max Batch Size (bytes)</label><input type="number" id="cfg_sequencer_max_batch_size_bytes"></div>
@@ -1113,11 +1139,44 @@ function collectConfig() {
   };
 }
 
+const SOLAXY_DEFAULT_PROVER = 'HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv';
+let _nodeOwnWallet = '';
+
+function updateRewardMode() {
+  const isOwn = document.getElementById('rewardModeOwn').checked;
+  document.getElementById('rewardDefaultInfo').style.display = isOwn ? 'none' : 'block';
+  document.getElementById('rewardOwnInfo').style.display = isOwn ? 'block' : 'none';
+
+  const addr = isOwn ? _nodeOwnWallet : SOLAXY_DEFAULT_PROVER;
+  document.getElementById('cfg_proof_manager_prover_address').value = addr;
+  document.getElementById('cfg_sequencer_rollup_address').value = addr;
+}
+
+function initRewardMode() {
+  // Fetch own wallet address from node-identity API
+  fetch('/api/node-identity').then(r => r.json()).then(data => {
+    if (data.solx_wallet) {
+      _nodeOwnWallet = data.solx_wallet;
+      document.getElementById('rewardOwnAddress').textContent = data.solx_wallet;
+    }
+  }).catch(() => {});
+
+  // Detect current mode from loaded config
+  const current = document.getElementById('cfg_proof_manager_prover_address').value;
+  if (current && current !== SOLAXY_DEFAULT_PROVER) {
+    document.getElementById('rewardModeOwn').checked = true;
+  } else {
+    document.getElementById('rewardModeDefault').checked = true;
+  }
+  updateRewardMode();
+}
+
 async function loadConfig() {
   try {
     const r = await fetch('/api/config');
     const data = await r.json();
     populateConfig(data);
+    initRewardMode();
   } catch (e) {
     console.error('Config load failed:', e);
   }
