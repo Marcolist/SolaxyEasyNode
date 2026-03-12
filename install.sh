@@ -142,6 +142,32 @@ sudo apt update -qq
 sudo apt install -y build-essential cmake pkg-config libudev-dev \
     postgresql python3 python3-pip libpq-dev curl tar git jq pv
 
+# Ensure swap exists (important for Full Node mode on low-RAM systems)
+TOTAL_RAM_MB=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)
+SWAP_MB=$(awk '/SwapTotal/ {printf "%d", $2/1024}' /proc/meminfo)
+if [[ "$SWAP_MB" -lt 1024 ]]; then
+    SWAP_SIZE_GB=$(( (TOTAL_RAM_MB < 8192) ? 4 : 2 ))
+    if [[ ! -f /swapfile ]]; then
+        log "Creating ${SWAP_SIZE_GB}G swap file (current swap: ${SWAP_MB}MB, RAM: ${TOTAL_RAM_MB}MB)..."
+        sudo fallocate -l "${SWAP_SIZE_GB}G" /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile >/dev/null
+        sudo swapon /swapfile
+        # Persist across reboots
+        if ! grep -q '/swapfile' /etc/fstab 2>/dev/null; then
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+        fi
+        log "Swap file created and activated."
+    else
+        # Swap file exists but is not active
+        if ! swapon --show | grep -q '/swapfile'; then
+            sudo swapon /swapfile 2>/dev/null || true
+        fi
+    fi
+else
+    log "Swap OK (${SWAP_MB}MB)."
+fi
+
 # ---------------------------------------------------------------------------
 # Step 2: Download svm-rollup
 # ---------------------------------------------------------------------------
@@ -345,6 +371,21 @@ else
     CELESTIA_SERVICE_NAME="celestia-light"
 fi
 
+# Clean up the other mode's service if switching (e.g. light→full on re-run)
+if $USE_CELESTIA_FULL && systemctl is-enabled --quiet celestia-light.service 2>/dev/null; then
+    warn "Switching from Celestia light → full. Stopping old light node..."
+    sudo systemctl stop celestia-light.service 2>/dev/null || true
+    sudo systemctl disable celestia-light.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/celestia-light.service
+    sudo systemctl daemon-reload
+elif ! $USE_CELESTIA_FULL && systemctl is-enabled --quiet celestia-full.service 2>/dev/null; then
+    warn "Switching from Celestia full → light. Stopping old full node..."
+    sudo systemctl stop celestia-full.service 2>/dev/null || true
+    sudo systemctl disable celestia-full.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/celestia-full.service
+    sudo systemctl daemon-reload
+fi
+
 log "Celestia mode: ${CELESTIA_MODE}"
 
 if [[ ! -d "$CELESTIA_STORE/keys" ]]; then
@@ -360,7 +401,8 @@ fi
 if [[ -f "$CELESTIA_STORE/config.toml" && ! -d "$CELESTIA_STORE/data" ]]; then
     log "Configuring Celestia pruning window..."
     sed -i "s|PruningWindow = .*|PruningWindow = \"${CELESTIA_PRUNING_WINDOW}\"|" "$CELESTIA_STORE/config.toml"
-    if [[ -n "$CELESTIA_SYNC_FROM_HEIGHT" && -n "$CELESTIA_SYNC_FROM_HASH" ]]; then
+    # SyncFromHeight/Hash only applies to light nodes — full nodes sync from genesis automatically
+    if [[ "$CELESTIA_MODE" == "light" && -n "$CELESTIA_SYNC_FROM_HEIGHT" && -n "$CELESTIA_SYNC_FROM_HASH" ]]; then
         log "Setting Celestia sync start: height=$CELESTIA_SYNC_FROM_HEIGHT"
         sed -i "s|SyncFromHeight = .*|SyncFromHeight = ${CELESTIA_SYNC_FROM_HEIGHT}|" "$CELESTIA_STORE/config.toml"
         sed -i "s|SyncFromHash = .*|SyncFromHash = \"${CELESTIA_SYNC_FROM_HASH}\"|" "$CELESTIA_STORE/config.toml"

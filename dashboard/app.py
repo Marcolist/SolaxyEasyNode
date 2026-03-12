@@ -1389,6 +1389,7 @@ def api_stats():
             "sync": solaxy_sync,
         },
         "celestia": {
+            "mode": CELESTIA_MODE,
             "service": celestia_svc,
             "sync": celestia_sync_state(),
             "das": celestia_das_stats(),
