@@ -538,12 +538,12 @@ canvas.sparkline{vertical-align:middle}
       </div>
     </div>
     <div class="svc-row">
-      <span class="svc-name">celestia-light</span>
+      <span class="svc-name">{{ celestia_service }}</span>
       <span class="svc-badge" id="svcBadgeCelestia">-</span>
       <div class="svc-btns">
-        <button class="btn btn-sm btn-secondary" onclick="svcAction('celestia-light','start')">Start</button>
-        <button class="btn btn-sm btn-danger" onclick="svcAction('celestia-light','stop')">Stop</button>
-        <button class="btn btn-sm btn-secondary" onclick="svcAction('celestia-light','restart')">Restart</button>
+        <button class="btn btn-sm btn-secondary" onclick="svcAction('{{ celestia_service }}','start')">Start</button>
+        <button class="btn btn-sm btn-danger" onclick="svcAction('{{ celestia_service }}','stop')">Stop</button>
+        <button class="btn btn-sm btn-secondary" onclick="svcAction('{{ celestia_service }}','restart')">Restart</button>
       </div>
     </div>
     <div class="svc-row">
@@ -924,7 +924,7 @@ async function fetchUptime() {
 function renderUptime(data) {
   const container = document.getElementById('uptimeContent');
   let html = '';
-  const services = ['solaxy-node', 'celestia-light', 'postgresql'];
+  const services = ['solaxy-node', '{{ celestia_service }}', 'postgresql'];
   for (const svc of services) {
     const info = data[svc];
     if (!info) continue;

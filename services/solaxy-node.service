@@ -1,8 +1,8 @@
 [Unit]
 Description=Solaxy SVM Rollup Node
-After=network-online.target postgresql.service celestia-light.service
+After=network-online.target postgresql.service %%CELESTIA_SERVICE%%.service
 Wants=network-online.target
-Requires=postgresql.service celestia-light.service
+Requires=postgresql.service %%CELESTIA_SERVICE%%.service
 
 [Service]
 User=%%USER%%

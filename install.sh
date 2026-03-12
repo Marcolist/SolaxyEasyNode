@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # SolaxyEasyNode — One-Line Installer
-# Sets up: SVM Rollup + Celestia Light Node + PostgreSQL + Dashboard
+# Sets up: SVM Rollup + Celestia Node (light or full) + PostgreSQL + Dashboard
 #
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main/install.sh | bash
@@ -17,6 +17,7 @@ CELESTIA_VERSION="v0.28.4"
 GO_VERSION="1.25.1"
 
 CELESTIA_PRUNING_WINDOW=""  # calculated dynamically after genesis DA height is known
+USE_CELESTIA_FULL=false     # set to true automatically when state export is too old for light node
 
 USER_NAME="$(whoami)"
 USER_HOME="$HOME"
@@ -208,7 +209,6 @@ mkdir -p "$USER_HOME/svm-rollup/genesis"
 
 GENESIS_PATH="$USER_HOME/svm-rollup/genesis/state_export.svmd"
 GENESIS_URL="https://download.solaxy.io/solaxy/state_export.svmd"
-GENESIS_FALLBACK_URL="https://map.orbitnode.dev/state/genesis.tar.gz"
 
 check_and_download "$GENESIS_URL" "$GENESIS_PATH" "genesis state (state_export.svmd)"
 
@@ -250,7 +250,7 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
     if [[ "$CELESTIA_SYNC_FROM_HEIGHT" -lt "$ESTIMATED_TAIL" ]]; then
         echo ""
         echo -e "${YELLOW}============================================================${NC}"
-        echo -e "${YELLOW}  WARNING: Solaxy state export is too old!${NC}"
+        echo -e "${YELLOW}  Solaxy state export requires historical Celestia blocks${NC}"
         echo -e "${YELLOW}============================================================${NC}"
         echo ""
         echo -e "  Genesis DA Height:              ${YELLOW}${GENESIS_DA_HEIGHT}${NC}"
@@ -258,72 +258,23 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
         echo -e "  Celestia tail (estimated, ~8d):  ${YELLOW}${ESTIMATED_TAIL}${NC}"
         echo -e "  Celestia head:                  ${CYAN}${CELESTIA_CURRENT_HEAD}${NC}"
         echo ""
-        echo -e "  A community-hosted fallback genesis is available at:"
-        echo -e "  ${CYAN}${GENESIS_FALLBACK_URL}${NC}"
+        echo -e "  A Celestia Light Node only keeps ~8 days of blocks."
+        echo -e "  To sync from genesis, a ${CYAN}Celestia Full Node${NC} is required."
+        echo -e "  It will use pruning (7 days) to keep disk usage low."
         echo ""
-        echo -e "  ${YELLOW}Note: This is NOT an official Solaxy download.${NC}"
-        echo -e "  It is maintained by the SolaxyEasyNode community."
+        echo -e "  ${YELLOW}Note: Full Node needs ~4-8 GB RAM and ~20-50 GB disk.${NC}"
+        echo -e "  Initial sync may take several hours."
         echo ""
-        read -rp "  Download genesis from community fallback server? [Y/n] " answer </dev/tty
+        read -rp "  Install Celestia Full Node for sync? [Y/n] " answer </dev/tty
         case "${answer,,}" in
             n|no)
-                err "Cannot continue — official state export too old and fallback declined."
+                err "Cannot continue — state export too old for light node and full node declined."
                 ;;
         esac
 
-        rm -rf "$USER_HOME/svm-rollup/genesis"
-        mkdir -p "$USER_HOME/svm-rollup/genesis"
-
-        FALLBACK_TMP="$USER_HOME/svm-rollup/genesis_fallback.tar.gz"
-        rm -f "$FALLBACK_TMP"
-
-        log "Downloading genesis from fallback server..."
-        FALLBACK_OK=false
-        for attempt in 1 2 3 4; do
-            if curl -fL# --retry 3 --retry-delay 2 -C - -o "$FALLBACK_TMP" "$GENESIS_FALLBACK_URL"; then
-                FALLBACK_OK=true
-                break
-            fi
-            warn "Download attempt $attempt failed, retrying in $((attempt * 2))s..."
-            sleep $((attempt * 2))
-        done
-
-        if $FALLBACK_OK && tar xzf "$FALLBACK_TMP" -C "$USER_HOME/svm-rollup/"; then
-            rm -f "$FALLBACK_TMP"
-            log "Fallback genesis downloaded and extracted."
-
-            # Re-read genesis DA height from the new files
-            if [[ -f "$CHAIN_STATE_FILE" ]]; then
-                GENESIS_DA_HEIGHT=$(python3 -c "import json; print(json.load(open('$CHAIN_STATE_FILE')).get('genesis_da_height', ''))" 2>/dev/null || true)
-            fi
-
-            if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
-                CELESTIA_SYNC_FROM_HEIGHT=$((GENESIS_DA_HEIGHT - 26000))
-                BLOCK_DIFF=$((CELESTIA_CURRENT_HEAD - GENESIS_DA_HEIGHT))
-                PRUNING_HOURS=$(( (BLOCK_DIFF * 11 / 3600) + 48 ))
-                if [[ $PRUNING_HOURS -lt 720 ]]; then PRUNING_HOURS=720; fi
-                CELESTIA_PRUNING_WINDOW="${PRUNING_HOURS}h0m0s"
-                log "Updated genesis DA height: $GENESIS_DA_HEIGHT — Celestia will sync from $CELESTIA_SYNC_FROM_HEIGHT"
-
-                # Re-check if the fallback genesis is also too old
-                ESTIMATED_TAIL=$((CELESTIA_CURRENT_HEAD - (CELESTIA_NET_AVAIL_HOURS * 3600 / 11)))
-                if [[ "$CELESTIA_SYNC_FROM_HEIGHT" -lt "$ESTIMATED_TAIL" ]]; then
-                    err "Fallback genesis is also too old. Cannot continue."
-                fi
-            else
-                err "Could not read genesis_da_height from fallback genesis."
-            fi
-        else
-            rm -f "$FALLBACK_TMP"
-            echo ""
-            echo -e "${RED}============================================================${NC}"
-            echo -e "${RED}  Fallback download failed!${NC}"
-            echo -e "${RED}============================================================${NC}"
-            echo -e "  Neither Solaxy nor the fallback server have a usable genesis."
-            echo -e "  Please try again later or contact the community for help."
-            echo -e "${RED}============================================================${NC}"
-            err "Cannot continue — no usable state export available."
-        fi
+        USE_CELESTIA_FULL=true
+        CELESTIA_PRUNING_WINDOW="168h0m0s"   # 7 days — keep disk usage low
+        log "Celestia Full Node mode enabled (pruning: 168h)."
     fi
 
     # Fetch the block hash from Celestia consensus RPC
@@ -381,17 +332,28 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 6: Init Celestia light node & extract auth token
+# Step 6: Init Celestia node & extract auth token
 # ---------------------------------------------------------------------------
-CELESTIA_STORE="$USER_HOME/.celestia-light"
+# Select node type based on whether full node is needed
+if $USE_CELESTIA_FULL; then
+    CELESTIA_MODE="full"
+    CELESTIA_STORE="$USER_HOME/.celestia-full"
+    CELESTIA_SERVICE_NAME="celestia-full"
+else
+    CELESTIA_MODE="light"
+    CELESTIA_STORE="$USER_HOME/.celestia-light"
+    CELESTIA_SERVICE_NAME="celestia-light"
+fi
+
+log "Celestia mode: ${CELESTIA_MODE}"
 
 if [[ ! -d "$CELESTIA_STORE/keys" ]]; then
-    log "Initializing Celestia light node..."
-    INIT_OUTPUT=$(celestia light init 2>&1)
+    log "Initializing Celestia ${CELESTIA_MODE} node..."
+    INIT_OUTPUT=$(celestia "$CELESTIA_MODE" init 2>&1)
     echo "$INIT_OUTPUT"
-    log "Celestia light node initialized."
+    log "Celestia ${CELESTIA_MODE} node initialized."
 else
-    warn "Celestia light node already initialized."
+    warn "Celestia ${CELESTIA_MODE} node already initialized."
 fi
 
 # Configure Celestia pruning window and sync start point (only on fresh init)
@@ -409,16 +371,16 @@ fi
 
 # Extract auth token
 log "Extracting Celestia auth token..."
-CELESTIA_AUTH_TOKEN=$(celestia light auth admin --node.store "$CELESTIA_STORE" 2>/dev/null || true)
+CELESTIA_AUTH_TOKEN=$(celestia "$CELESTIA_MODE" auth admin --node.store "$CELESTIA_STORE" 2>/dev/null || true)
 
 if [[ -z "$CELESTIA_AUTH_TOKEN" ]]; then
     # Try to start celestia briefly to generate the token
     warn "Could not get auth token yet. Will start Celestia to generate it..."
-    celestia light start --core.ip "$CELESTIA_CORE_IP" --core.port "$CELESTIA_CORE_PORT" \
+    celestia "$CELESTIA_MODE" start --core.ip "$CELESTIA_CORE_IP" --core.port "$CELESTIA_CORE_PORT" \
         --keyring.keyname my_celes_key &
     CELESTIA_PID=$!
     sleep 10
-    CELESTIA_AUTH_TOKEN=$(celestia light auth admin --node.store "$CELESTIA_STORE" 2>/dev/null || true)
+    CELESTIA_AUTH_TOKEN=$(celestia "$CELESTIA_MODE" auth admin --node.store "$CELESTIA_STORE" 2>/dev/null || true)
     kill $CELESTIA_PID 2>/dev/null || true
     wait $CELESTIA_PID 2>/dev/null || true
 fi
@@ -608,9 +570,9 @@ install_service() {
 cat > "$tmp" << EOF
 [Unit]
 Description=Solaxy SVM Rollup Node
-After=network-online.target postgresql.service celestia-light.service
+After=network-online.target postgresql.service ${CELESTIA_SERVICE_NAME}.service
 Wants=network-online.target
-Requires=postgresql.service celestia-light.service
+Requires=postgresql.service ${CELESTIA_SERVICE_NAME}.service
 
 [Service]
 User=${USER_NAME}
@@ -628,17 +590,19 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 EOF
             ;;
-            celestia-light.service)
+            celestia-light.service|celestia-full.service)
+                local cel_mode="${name%.service}"     # celestia-light or celestia-full
+                cel_mode="${cel_mode#celestia-}"       # light or full
 cat > "$tmp" << EOF
 [Unit]
-Description=Celestia Light Node
+Description=Celestia ${cel_mode^} Node
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=${USER_NAME}
 Type=simple
-ExecStart=/usr/local/bin/celestia light start --core.ip ${CELESTIA_CORE_IP} --core.port ${CELESTIA_CORE_PORT} --keyring.keyname my_celes_key
+ExecStart=/usr/local/bin/celestia ${cel_mode} start --core.ip ${CELESTIA_CORE_IP} --core.port ${CELESTIA_CORE_PORT} --keyring.keyname my_celes_key
 Restart=on-failure
 RestartSec=10
 LimitNOFILE=65535
@@ -670,23 +634,23 @@ EOF
     fi
 
     # Replace placeholders
-    sed -i "s|%%USER%%|${USER_NAME}|g; s|%%HOME%%|${USER_HOME}|g" "$tmp"
+    sed -i "s|%%USER%%|${USER_NAME}|g; s|%%HOME%%|${USER_HOME}|g; s|%%CELESTIA_SERVICE%%|${CELESTIA_SERVICE_NAME}|g; s|%%CELESTIA_MODE%%|${CELESTIA_MODE}|g" "$tmp"
     sudo cp "$tmp" "/etc/systemd/system/${name}"
     rm -f "$tmp"
 }
 
 install_service "solaxy-node.service"
-install_service "celestia-light.service"
+install_service "${CELESTIA_SERVICE_NAME}.service"
 install_service "solaxy-dashboard.service"
 
 sudo systemctl daemon-reload
-sudo systemctl enable celestia-light solaxy-node solaxy-dashboard
+sudo systemctl enable "$CELESTIA_SERVICE_NAME" solaxy-node solaxy-dashboard
 
 # Allow the dashboard to manage services without a password prompt
 log "Configuring passwordless sudo for service management..."
 sudo tee /etc/sudoers.d/solaxy-dashboard > /dev/null << EOF
 ${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start solaxy-node.service, /usr/bin/systemctl stop solaxy-node.service, /usr/bin/systemctl restart solaxy-node.service
-${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start celestia-light.service, /usr/bin/systemctl stop celestia-light.service, /usr/bin/systemctl restart celestia-light.service
+${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start ${CELESTIA_SERVICE_NAME}.service, /usr/bin/systemctl stop ${CELESTIA_SERVICE_NAME}.service, /usr/bin/systemctl restart ${CELESTIA_SERVICE_NAME}.service
 ${USER_NAME} ALL=(ALL) NOPASSWD: /usr/bin/systemctl start solaxy-dashboard.service, /usr/bin/systemctl stop solaxy-dashboard.service, /usr/bin/systemctl restart solaxy-dashboard.service
 EOF
 sudo chmod 440 /etc/sudoers.d/solaxy-dashboard
@@ -708,7 +672,7 @@ else
 fi
 
 # Start services (start is a no-op if already running; restart dashboard to pick up new files)
-sudo systemctl start celestia-light
+sudo systemctl start "$CELESTIA_SERVICE_NAME"
 if ! systemctl is-active --quiet solaxy-node.service; then
     log "Waiting for Celestia to initialize..."
     sleep 15
@@ -732,14 +696,17 @@ echo -e "  LAN IP:       ${CYAN}${LAN_IP}${NC}"
 echo ""
 echo -e "  ${YELLOW}Open the dashboard to set your password (first visit).${NC}"
 echo ""
+echo -e "  Celestia mode:  ${CYAN}${CELESTIA_MODE}${NC}"
+echo ""
 echo -e "  Service Status:"
-echo -e "    celestia-light:    $(systemctl is-active celestia-light.service)"
+echo -e "    ${CELESTIA_SERVICE_NAME}:    $(systemctl is-active ${CELESTIA_SERVICE_NAME}.service)"
 echo -e "    solaxy-node:       $(systemctl is-active solaxy-node.service)"
 echo -e "    solaxy-dashboard:  $(systemctl is-active solaxy-dashboard.service)"
 echo -e "    postgresql:        $(systemctl is-active postgresql.service)"
 echo ""
 echo -e "  Config:       ${CYAN}${USER_HOME}/svm-rollup/config.toml${NC}"
 echo -e "  Node Wallet:  ${CYAN}${USER_HOME}/svm-rollup/node-wallet.json${NC}"
+echo -e "  Celestia:     ${CYAN}${CELESTIA_STORE}${NC}"
 echo -e "  Logs:         journalctl -u solaxy-node -f"
 echo ""
 echo -e "${CYAN}============================================================${NC}"
