@@ -31,8 +31,10 @@ _cache = {}
 _cache_lock = threading.Lock()
 
 def _detect_celestia_mode():
-    """Detect whether we're running a celestia light or full node."""
-    # Check which store directory exists
+    """Detect whether we're running a celestia light, bridge, or full node."""
+    # Check which store directory exists (bridge replaces full in v0.29.1+)
+    if Path(os.path.expanduser("~/.celestia-bridge/keys")).exists():
+        return "bridge"
     if Path(os.path.expanduser("~/.celestia-full/keys")).exists():
         return "full"
     return "light"

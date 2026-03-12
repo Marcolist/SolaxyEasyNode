@@ -13,11 +13,11 @@ CELESTIA_CORE_IP="rpc.celestia.pops.one"
 CELESTIA_CORE_PORT="9090"
 CELESTIA_GRPC="http://${CELESTIA_CORE_IP}:${CELESTIA_CORE_PORT}"
 CELESTIA_REPO="https://github.com/celestiaorg/celestia-node.git"
-CELESTIA_VERSION="v0.28.4"
-GO_VERSION="1.25.1"
+CELESTIA_VERSION="v0.29.1"
+GO_VERSION="1.26"
 
 CELESTIA_PRUNING_WINDOW=""  # calculated dynamically after genesis DA height is known
-USE_CELESTIA_FULL=false     # set to true automatically when state export is too old for light node
+USE_CELESTIA_BRIDGE=false   # set to true automatically when state export is too old for light node
 
 USER_NAME="$(whoami)"
 USER_HOME="$HOME"
@@ -285,22 +285,23 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
         echo -e "  Celestia head:                  ${CYAN}${CELESTIA_CURRENT_HEAD}${NC}"
         echo ""
         echo -e "  A Celestia Light Node only keeps ~8 days of blocks."
-        echo -e "  To sync from genesis, a ${CYAN}Celestia Full Node${NC} is required."
-        echo -e "  It will use pruning (7 days) to keep disk usage low."
+        echo -e "  A ${CYAN}Celestia Bridge Node${NC} with SyncFromHeight will be used instead."
+        echo -e "  Bridge nodes support pruning to keep disk usage low."
         echo ""
-        echo -e "  ${YELLOW}Note: Full Node needs ~4-8 GB RAM and ~20-50 GB disk.${NC}"
+        echo -e "  ${YELLOW}Note: Bridge Node needs ~4-8 GB RAM and ~20-50 GB disk.${NC}"
         echo -e "  Initial sync may take several hours."
         echo ""
-        read -rp "  Install Celestia Full Node for sync? [Y/n] " answer </dev/tty
+        read -rp "  Install Celestia Bridge Node for sync? [Y/n] " answer </dev/tty
         case "${answer,,}" in
             n|no)
-                err "Cannot continue — state export too old for light node and full node declined."
+                err "Cannot continue — state export too old for light node and bridge node declined."
                 ;;
         esac
 
-        USE_CELESTIA_FULL=true
+        USE_CELESTIA_BRIDGE=true
+        CELESTIA_SYNC_FROM_HEIGHT=9800000
         CELESTIA_PRUNING_WINDOW="168h0m0s"   # 7 days — keep disk usage low
-        log "Celestia Full Node mode enabled (pruning: 168h)."
+        log "Celestia Bridge Node mode enabled (SyncFromHeight: $CELESTIA_SYNC_FROM_HEIGHT, pruning: 168h)."
     fi
 
     # Fetch the block hash from Celestia consensus RPC
@@ -340,10 +341,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5: Install Celestia Light Node
+# Step 5: Install Celestia Node (light or bridge)
 # ---------------------------------------------------------------------------
 if ! command -v celestia &>/dev/null; then
-    log "Building Celestia light node from source..."
+    log "Building Celestia node from source..."
     cd /tmp
     rm -rf celestia-node
     git clone --depth 1 --branch "$CELESTIA_VERSION" "$CELESTIA_REPO"
@@ -360,30 +361,38 @@ fi
 # ---------------------------------------------------------------------------
 # Step 6: Init Celestia node & extract auth token
 # ---------------------------------------------------------------------------
-# Select node type based on whether full node is needed
-if $USE_CELESTIA_FULL; then
-    CELESTIA_MODE="full"
-    CELESTIA_STORE="$USER_HOME/.celestia-full"
-    CELESTIA_SERVICE_NAME="celestia-full"
+# Select node type based on whether bridge node is needed
+if $USE_CELESTIA_BRIDGE; then
+    CELESTIA_MODE="bridge"
+    CELESTIA_STORE="$USER_HOME/.celestia-bridge"
+    CELESTIA_SERVICE_NAME="celestia-bridge"
 else
     CELESTIA_MODE="light"
     CELESTIA_STORE="$USER_HOME/.celestia-light"
     CELESTIA_SERVICE_NAME="celestia-light"
 fi
 
-# Clean up the other mode's service if switching (e.g. light→full on re-run)
-if $USE_CELESTIA_FULL && systemctl is-enabled --quiet celestia-light.service 2>/dev/null; then
-    warn "Switching from Celestia light → full. Stopping old light node..."
-    sudo systemctl stop celestia-light.service 2>/dev/null || true
-    sudo systemctl disable celestia-light.service 2>/dev/null || true
-    sudo rm -f /etc/systemd/system/celestia-light.service
-    sudo systemctl daemon-reload
-elif ! $USE_CELESTIA_FULL && systemctl is-enabled --quiet celestia-full.service 2>/dev/null; then
-    warn "Switching from Celestia full → light. Stopping old full node..."
-    sudo systemctl stop celestia-full.service 2>/dev/null || true
-    sudo systemctl disable celestia-full.service 2>/dev/null || true
-    sudo rm -f /etc/systemd/system/celestia-full.service
-    sudo systemctl daemon-reload
+# Clean up old mode services if switching (e.g. light→bridge or old full→bridge on re-run)
+if $USE_CELESTIA_BRIDGE; then
+    for old_svc in celestia-light.service celestia-full.service; do
+        if systemctl is-enabled --quiet "$old_svc" 2>/dev/null; then
+            warn "Switching to Celestia bridge. Stopping old ${old_svc}..."
+            sudo systemctl stop "$old_svc" 2>/dev/null || true
+            sudo systemctl disable "$old_svc" 2>/dev/null || true
+            sudo rm -f "/etc/systemd/system/${old_svc}"
+            sudo systemctl daemon-reload
+        fi
+    done
+else
+    for old_svc in celestia-bridge.service celestia-full.service; do
+        if systemctl is-enabled --quiet "$old_svc" 2>/dev/null; then
+            warn "Switching to Celestia light. Stopping old ${old_svc}..."
+            sudo systemctl stop "$old_svc" 2>/dev/null || true
+            sudo systemctl disable "$old_svc" 2>/dev/null || true
+            sudo rm -f "/etc/systemd/system/${old_svc}"
+            sudo systemctl daemon-reload
+        fi
+    done
 fi
 
 log "Celestia mode: ${CELESTIA_MODE}"
@@ -393,6 +402,10 @@ if [[ ! -d "$CELESTIA_STORE/keys" ]]; then
     INIT_OUTPUT=$(celestia "$CELESTIA_MODE" init 2>&1)
     echo "$INIT_OUTPUT"
     log "Celestia ${CELESTIA_MODE} node initialized."
+
+    # Run config-update for v0.29.1+ (required after init for schema migration)
+    log "Running Celestia config-update..."
+    celestia "$CELESTIA_MODE" config-update --p2p.network celestia 2>&1 || true
 else
     warn "Celestia ${CELESTIA_MODE} node already initialized."
 fi
@@ -401,11 +414,14 @@ fi
 if [[ -f "$CELESTIA_STORE/config.toml" && ! -d "$CELESTIA_STORE/data" ]]; then
     log "Configuring Celestia pruning window..."
     sed -i "s|PruningWindow = .*|PruningWindow = \"${CELESTIA_PRUNING_WINDOW}\"|" "$CELESTIA_STORE/config.toml"
-    # SyncFromHeight/Hash only applies to light nodes — full nodes sync from genesis automatically
-    if [[ "$CELESTIA_MODE" == "light" && -n "$CELESTIA_SYNC_FROM_HEIGHT" && -n "$CELESTIA_SYNC_FROM_HASH" ]]; then
+    # SyncFromHeight/Hash applies to both light and bridge nodes (v0.29.1+)
+    if [[ -n "$CELESTIA_SYNC_FROM_HEIGHT" && -n "$CELESTIA_SYNC_FROM_HASH" ]]; then
         log "Setting Celestia sync start: height=$CELESTIA_SYNC_FROM_HEIGHT"
         sed -i "s|SyncFromHeight = .*|SyncFromHeight = ${CELESTIA_SYNC_FROM_HEIGHT}|" "$CELESTIA_STORE/config.toml"
         sed -i "s|SyncFromHash = .*|SyncFromHash = \"${CELESTIA_SYNC_FROM_HASH}\"|" "$CELESTIA_STORE/config.toml"
+    elif [[ -n "$CELESTIA_SYNC_FROM_HEIGHT" ]]; then
+        log "Setting Celestia sync start: height=$CELESTIA_SYNC_FROM_HEIGHT (no hash)"
+        sed -i "s|SyncFromHeight = .*|SyncFromHeight = ${CELESTIA_SYNC_FROM_HEIGHT}|" "$CELESTIA_STORE/config.toml"
     fi
 else
     warn "Celestia already has data, keeping existing sync config."
@@ -654,7 +670,7 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 EOF
             ;;
-            celestia-light.service|celestia-full.service)
+            celestia-light.service|celestia-bridge.service|celestia-full.service)
                 local cel_mode="${name%.service}"     # celestia-light or celestia-full
                 cel_mode="${cel_mode#celestia-}"       # light or full
 cat > "$tmp" << EOF

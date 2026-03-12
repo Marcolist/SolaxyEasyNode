@@ -1,0 +1,15 @@
+[Unit]
+Description=Celestia Bridge Node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=%%USER%%
+Type=simple
+ExecStart=/usr/local/bin/celestia bridge start --core.ip rpc.celestia.pops.one --core.port 9090 --keyring.keyname my_celes_key
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
