@@ -450,7 +450,43 @@ fi
 log "PostgreSQL configured (database: svm). Tables will be created by svm-rollup migrations."
 
 # ---------------------------------------------------------------------------
-# Step 9: Generate config.toml (skip if it already exists)
+# Step 9: Generate node wallet (needed before config.toml for reward address)
+# ---------------------------------------------------------------------------
+log "Setting up Solaxy node wallet..."
+SOLANA_KEYGEN="$USER_HOME/.local/share/solana/install/active_release/bin/solana-keygen"
+NODE_WALLET_PATH="$USER_HOME/svm-rollup/node-wallet.json"
+
+if [[ ! -f "$NODE_WALLET_PATH" ]]; then
+    if command -v solana-keygen &>/dev/null; then
+        solana-keygen new --outfile "$NODE_WALLET_PATH" --no-bip39-passphrase --force
+    elif [[ -f "$SOLANA_KEYGEN" ]]; then
+        "$SOLANA_KEYGEN" new --outfile "$NODE_WALLET_PATH" --no-bip39-passphrase --force
+    else
+        warn "solana-keygen not found. Install Solana CLI to generate wallet, or copy an existing wallet."
+    fi
+else
+    warn "Node wallet already exists."
+fi
+
+# Derive wallet address for config.toml
+NODE_WALLET_ADDRESS=""
+if [[ -f "$NODE_WALLET_PATH" ]]; then
+    if command -v solana-keygen &>/dev/null; then
+        NODE_WALLET_ADDRESS=$(solana-keygen pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
+    elif [[ -f "$SOLANA_KEYGEN" ]]; then
+        NODE_WALLET_ADDRESS=$("$SOLANA_KEYGEN" pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
+    fi
+fi
+
+if [[ -n "$NODE_WALLET_ADDRESS" ]]; then
+    log "Node wallet address: $NODE_WALLET_ADDRESS"
+else
+    warn "Could not derive wallet address. Config will use Solaxy default prover."
+    NODE_WALLET_ADDRESS="HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+fi
+
+# ---------------------------------------------------------------------------
+# Step 10: Generate config.toml (skip if it already exists)
 # ---------------------------------------------------------------------------
 cd "$USER_HOME/svm-rollup"
 
@@ -493,12 +529,12 @@ telegraf_address = "127.0.0.1:8094"
 
 [proof_manager]
 aggregated_proof_block_jump = 1
-prover_address = "HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+prover_address = "%%NODE_WALLET_ADDRESS%%"
 max_number_of_transitions_in_db = 100
 max_number_of_transitions_in_memory = 30
 
 [sequencer]
-rollup_address = "HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+rollup_address = "%%NODE_WALLET_ADDRESS%%"
 max_allowed_node_distance_behind = 5
 max_concurrent_blobs = 128
 max_batch_size_bytes = 1048576
@@ -512,6 +548,7 @@ TMPL
     sed -e "s|%%RPC_AUTH_TOKEN%%|${CELESTIA_AUTH_TOKEN}|g" \
         -e "s|%%GRPC_URL%%|${CELESTIA_GRPC}|g" \
         -e "s|%%SIGNER_PRIVATE_KEY%%|${SIGNER_KEY}|g" \
+        -e "s|%%NODE_WALLET_ADDRESS%%|${NODE_WALLET_ADDRESS}|g" \
         /tmp/config.toml.template > "$USER_HOME/svm-rollup/config.toml"
 
     rm -f /tmp/config.toml.template
@@ -521,14 +558,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 10: Install Python dependencies
+# Step 11: Install Python dependencies
 # ---------------------------------------------------------------------------
 log "Installing Python dependencies..."
-pip3 install --break-system-packages flask psycopg2-binary requests 2>/dev/null || \
-    pip3 install flask psycopg2-binary requests
+pip3 install --break-system-packages flask psycopg2-binary requests base58 2>/dev/null || \
+    pip3 install flask psycopg2-binary requests base58
 
 # ---------------------------------------------------------------------------
-# Step 11: Setup Dashboard
+# Step 12: Setup Dashboard
 # ---------------------------------------------------------------------------
 log "Setting up dashboard..."
 mkdir -p "$USER_HOME/dashboard/templates" "$USER_HOME/dashboard/static"
@@ -541,23 +578,7 @@ if [[ ! -f "$USER_HOME/dashboard/app.py" ]]; then
     warn "Could not download dashboard files. Copy them manually from the repo."
 fi
 
-# ---------------------------------------------------------------------------
-# Step 12: Generate node wallet
-# ---------------------------------------------------------------------------
-log "Setting up Solaxy node wallet..."
-SOLANA_KEYGEN="$USER_HOME/.local/share/solana/install/active_release/bin/solana-keygen"
-
-if [[ ! -f "$USER_HOME/svm-rollup/node-wallet.json" ]]; then
-    if command -v solana-keygen &>/dev/null; then
-        solana-keygen new --outfile "$USER_HOME/svm-rollup/node-wallet.json" --no-bip39-passphrase --force
-    elif [[ -f "$SOLANA_KEYGEN" ]]; then
-        "$SOLANA_KEYGEN" new --outfile "$USER_HOME/svm-rollup/node-wallet.json" --no-bip39-passphrase --force
-    else
-        warn "solana-keygen not found. Install Solana CLI to generate wallet, or copy an existing wallet."
-    fi
-else
-    warn "Node wallet already exists."
-fi
+# (Wallet generation moved to Step 9, before config.toml)
 
 # ---------------------------------------------------------------------------
 # Step 13: Install systemd services
