@@ -594,7 +594,8 @@ fi
 # Step 11: Install Python dependencies
 # ---------------------------------------------------------------------------
 log "Installing Python dependencies..."
-pip3 install --break-system-packages flask psycopg2-binary requests base58 2>/dev/null || \
+pip3 install --break-system-packages --ignore-installed flask psycopg2-binary requests base58 2>/dev/null || \
+    pip3 install --break-system-packages flask psycopg2-binary requests base58 2>/dev/null || \
     pip3 install flask psycopg2-binary requests base58
 
 # ---------------------------------------------------------------------------
