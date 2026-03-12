@@ -1483,11 +1483,17 @@ def node_identity():
         info["tia_balance"] = "0"
     # Solaxy L2 wallet
     try:
+        import base58
+        # Auto-generate wallet if it doesn't exist
+        if not os.path.isfile(SOLX_WALLET_PATH):
+            from nacl.signing import SigningKey
+            sk = SigningKey.generate()
+            keypair = list(sk.encode() + sk.verify_key.encode())
+            os.makedirs(os.path.dirname(SOLX_WALLET_PATH), exist_ok=True)
+            with open(SOLX_WALLET_PATH, "w") as wf:
+                json.dump(keypair, wf)
         with open(SOLX_WALLET_PATH) as f:
-            import base58
-            key_bytes = bytes(json.load(f)[:32])
-            # Derive public key from first 64 bytes (keypair = secret + public)
-            full = json.load(open(SOLX_WALLET_PATH))
+            full = json.load(f)
             pub_bytes = bytes(full[32:])
             info["solx_wallet"] = base58.b58encode(pub_bytes).decode()
     except Exception:
