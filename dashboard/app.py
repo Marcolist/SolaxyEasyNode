@@ -30,7 +30,17 @@ app = Flask(__name__)
 _cache = {}
 _cache_lock = threading.Lock()
 
-CELESTIA_STORE = os.path.expanduser("~/.celestia-light/")
+def _detect_celestia_mode():
+    """Detect whether we're running a celestia light or full node."""
+    # Check which store directory exists
+    if Path(os.path.expanduser("~/.celestia-full/keys")).exists():
+        return "full"
+    return "light"
+
+CELESTIA_MODE = _detect_celestia_mode()
+CELESTIA_SERVICE = f"celestia-{CELESTIA_MODE}"
+CELESTIA_SERVICE_UNIT = f"{CELESTIA_SERVICE}.service"
+CELESTIA_STORE = os.path.expanduser(f"~/.celestia-{CELESTIA_MODE}/")
 DASHBOARD_DIR = Path.home() / "dashboard"
 REPO_RAW_URL = "https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main"
 DASHBOARD_FILES = [
@@ -609,7 +619,7 @@ def _telegram_alert_loop():
     """Background thread: check services every 60s, log uptime/metrics, auto-restart."""
     import socket
     hostname = socket.gethostname()
-    services = ["solaxy-node", "celestia-light", "postgresql"]
+    services = ["solaxy-node", CELESTIA_SERVICE, "postgresql"]
 
     while True:
         time.sleep(60)
@@ -740,7 +750,7 @@ def _telegram_build_health():
 
     services = [
         ("solaxy-node", "solaxy-node"),
-        ("celestia-light", "celestia-light"),
+        (CELESTIA_SERVICE, CELESTIA_SERVICE),
         ("postgresql", "postgresql"),
     ]
     lines = [f"📊 Health — {hostname}", ""]
@@ -792,7 +802,7 @@ def _telegram_build_log(service="solaxy"):
     hostname = socket.gethostname()
     svc_map = {
         "solaxy": "solaxy-node.service",
-        "celestia": "celestia-light.service",
+        "celestia": CELESTIA_SERVICE_UNIT,
         "postgresql": "postgresql@16-main.service",
     }
     svc = svc_map.get(service, svc_map["solaxy"])
@@ -1362,14 +1372,14 @@ def system_stats():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", celestia_service=CELESTIA_SERVICE)
 
 
 @app.route("/api/stats")
 def api_stats():
     solaxy_svc = systemd_status("solaxy-node.service")
     solaxy_sync = parse_solaxy_logs()
-    celestia_svc = systemd_status("celestia-light.service")
+    celestia_svc = systemd_status(CELESTIA_SERVICE_UNIT)
     pg_svc = systemd_status("postgresql.service")
 
     return jsonify({
@@ -1402,7 +1412,7 @@ def api_stats():
 def api_logs(service):
     service_map = {
         "solaxy": "solaxy-node.service",
-        "celestia": "celestia-light.service",
+        "celestia": CELESTIA_SERVICE_UNIT,
         "postgresql": "postgresql@16-main.service",
     }
     svc = service_map.get(service)
@@ -1507,7 +1517,7 @@ def api_node_identity():
 def api_uptime():
     hours = int(request.args.get("hours", 24))
     cutoff = time.time() - hours * 3600
-    services = ["solaxy-node", "celestia-light", "postgresql"]
+    services = ["solaxy-node", CELESTIA_SERVICE, "postgresql"]
     result = {}
 
     try:
@@ -1722,7 +1732,7 @@ def api_config_post():
 
 ALLOWED_SERVICES = {
     "solaxy-node": "solaxy-node.service",
-    "celestia-light": "celestia-light.service",
+    CELESTIA_SERVICE: CELESTIA_SERVICE_UNIT,
     "postgresql": "postgresql.service",
     "solaxy-dashboard": "solaxy-dashboard.service",
 }
