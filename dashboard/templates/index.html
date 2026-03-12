@@ -209,16 +209,20 @@ canvas.sparkline{vertical-align:middle}
   <!-- Celestia Card -->
   <div class="card">
     <div class="card-header">
-      <h3>Celestia Light Node</h3>
+      <h3>Celestia <span id="celModeLabel">{{ celestia_service.replace('celestia-', '').title() }}</span> Node</h3>
       <span class="badge" id="celestiaBadge">-</span>
     </div>
     <div class="stat-grid">
       <div class="stat"><span class="stat-label">Head Height</span><span class="stat-value" id="celHead">-</span></div>
-      <div class="stat"><span class="stat-label">DAS Sampled</span><span class="stat-value" id="celDas">-</span></div>
+      <div class="stat"><span class="stat-label">Network Head</span><span class="stat-value" id="celNetHead">-</span></div>
       <div class="stat"><span class="stat-label">Balance</span><span class="stat-value" id="celBalance">-</span></div>
       <div class="stat"><span class="stat-label">Memory</span><span class="stat-value" id="celMem">-</span></div>
     </div>
     <div style="margin-top:10px">
+      <div class="stat-label">Header Sync</div>
+      <div class="progress-bar"><div class="progress-fill" id="celSyncBar" style="width:0%">0%</div></div>
+    </div>
+    <div style="margin-top:6px">
       <div class="stat-label">DAS Catch-up</div>
       <div class="progress-bar"><div class="progress-fill" id="celDasBar" style="width:0%">0%</div></div>
     </div>
@@ -687,15 +691,24 @@ function updateStats(data) {
   // Celestia
   const cel = data.celestia;
   setBadge('celestiaBadge', cel.service.active);
-  document.getElementById('celHead').textContent = num(cel.sync.height);
+  const celHeight = cel.sync.height || 0;
+  document.getElementById('celHead').textContent = num(celHeight);
   document.getElementById('celMem').textContent = cel.service.memory_mb != null ? cel.service.memory_mb + ' MB' : '-';
 
+  // Header sync progress
+  const celNetHead = (cel.das && cel.das.network_head_height) || 0;
+  document.getElementById('celNetHead').textContent = celNetHead > 0 ? num(celNetHead) : '-';
+  if (celNetHead > 0 && celHeight > 0) {
+    const syncPct = Math.min(100, (celHeight / celNetHead * 100)).toFixed(2);
+    document.getElementById('celSyncBar').style.width = syncPct + '%';
+    document.getElementById('celSyncBar').textContent = syncPct + '%';
+  }
+
+  // DAS sampling progress
   if (cel.das) {
     const sampled = cel.das.head_of_sampled_chain || 0;
-    const netHead = cel.das.network_head_height || 0;
-    document.getElementById('celDas').textContent = num(sampled);
-    if (netHead > 0) {
-      const dasPct = Math.min(100, (sampled / netHead * 100)).toFixed(2);
+    if (celNetHead > 0) {
+      const dasPct = Math.min(100, (sampled / celNetHead * 100)).toFixed(2);
       document.getElementById('celDasBar').style.width = dasPct + '%';
       document.getElementById('celDasBar').textContent = dasPct + '%';
     }
