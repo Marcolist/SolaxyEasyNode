@@ -331,7 +331,7 @@ if $NEED_CELESTIA_BUILD; then
     rm -rf celestia-node
     git clone --depth 1 --branch "$CELESTIA_VERSION" "$CELESTIA_REPO"
     cd celestia-node
-    make build
+    GOTOOLCHAIN=local make build
     sudo make install
     cd "$USER_HOME"
     rm -rf /tmp/celestia-node
