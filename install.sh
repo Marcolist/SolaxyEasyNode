@@ -473,7 +473,7 @@ fi
 log "PostgreSQL configured (database: svm). Tables will be created by svm-rollup migrations."
 
 # ---------------------------------------------------------------------------
-# Step 9: Generate node wallet (needed before config.toml for reward address)
+# Step 9: Generate node wallet (used as attester identity)
 # ---------------------------------------------------------------------------
 log "Setting up Solaxy node wallet..."
 SOLANA_KEYGEN="$USER_HOME/.local/share/solana/install/active_release/bin/solana-keygen"
@@ -491,21 +491,17 @@ else
     warn "Node wallet already exists."
 fi
 
-# Derive wallet address for config.toml
-NODE_WALLET_ADDRESS=""
+# Display wallet address (informational only - config always uses the official sequencer)
 if [[ -f "$NODE_WALLET_PATH" ]]; then
+    _wallet_addr=""
     if command -v solana-keygen &>/dev/null; then
-        NODE_WALLET_ADDRESS=$(solana-keygen pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
+        _wallet_addr=$(solana-keygen pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
     elif [[ -f "$SOLANA_KEYGEN" ]]; then
-        NODE_WALLET_ADDRESS=$("$SOLANA_KEYGEN" pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
+        _wallet_addr=$("$SOLANA_KEYGEN" pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
     fi
-fi
-
-if [[ -n "$NODE_WALLET_ADDRESS" ]]; then
-    log "Node wallet address: $NODE_WALLET_ADDRESS"
-else
-    warn "Could not derive wallet address. Config will use Solaxy default prover."
-    NODE_WALLET_ADDRESS="HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+    if [[ -n "$_wallet_addr" ]]; then
+        log "Node wallet address (attester identity): $_wallet_addr"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -552,12 +548,12 @@ telegraf_address = "127.0.0.1:8094"
 
 [proof_manager]
 aggregated_proof_block_jump = 1
-prover_address = "%%NODE_WALLET_ADDRESS%%"
+prover_address = "HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
 max_number_of_transitions_in_db = 100
 max_number_of_transitions_in_memory = 30
 
 [sequencer]
-rollup_address = "%%NODE_WALLET_ADDRESS%%"
+rollup_address = "HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
 max_allowed_node_distance_behind = 5
 max_concurrent_blobs = 128
 max_batch_size_bytes = 1048576
@@ -571,7 +567,6 @@ TMPL
     sed -e "s|%%RPC_AUTH_TOKEN%%|${CELESTIA_AUTH_TOKEN}|g" \
         -e "s|%%GRPC_URL%%|${CELESTIA_GRPC}|g" \
         -e "s|%%SIGNER_PRIVATE_KEY%%|${SIGNER_KEY}|g" \
-        -e "s|%%NODE_WALLET_ADDRESS%%|${NODE_WALLET_ADDRESS}|g" \
         /tmp/config.toml.template > "$USER_HOME/svm-rollup/config.toml"
 
     rm -f /tmp/config.toml.template
