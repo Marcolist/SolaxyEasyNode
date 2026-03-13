@@ -282,6 +282,10 @@ fi
 # ---------------------------------------------------------------------------
 # Step 4: Install Go (needed for Celestia)
 # ---------------------------------------------------------------------------
+# Set PATH up front so /usr/local/go/bin always takes priority over system Go
+export PATH=/usr/local/go/bin:$USER_HOME/go/bin:$PATH
+hash -r 2>/dev/null  # clear bash binary cache
+
 NEED_GO_INSTALL=false
 if ! command -v go &>/dev/null; then
     NEED_GO_INSTALL=true
@@ -290,7 +294,6 @@ else
     INSTALLED_GO=$(go version | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "0.0.0")
     REQUIRED_GO_MINOR=$(echo "$GO_VERSION" | cut -d. -f1-2)
     INSTALLED_GO_MINOR=$(echo "$INSTALLED_GO" | cut -d. -f1-2)
-    # sort -V puts smallest first; if installed is the smallest AND differs from required, it's too old
     if [[ "$(printf '%s\n' "$REQUIRED_GO_MINOR" "$INSTALLED_GO_MINOR" | sort -V | head -1)" == "$REQUIRED_GO_MINOR" ]]; then
         log "Go already at ${INSTALLED_GO} (>= ${GO_VERSION})."
     else
@@ -306,11 +309,9 @@ if $NEED_GO_INSTALL; then
     log "Extracting Go..."
     pv "go${GO_VERSION}.linux-amd64.tar.gz" | sudo tar -C /usr/local -xzf - 2>/dev/null || sudo tar -C /usr/local -xzf "go${GO_VERSION}.linux-amd64.tar.gz"
     rm -f "go${GO_VERSION}.linux-amd64.tar.gz"
+    hash -r 2>/dev/null  # clear bash binary cache after installing new Go
 fi
 
-# Ensure /usr/local/go/bin is FIRST in PATH so it takes priority over any
-# system-packaged Go (e.g. /usr/bin/go from apt)
-export PATH=/usr/local/go/bin:$USER_HOME/go/bin:$PATH
 if ! grep -q '/usr/local/go/bin' "$USER_HOME/.profile" 2>/dev/null; then
     echo 'export PATH=/usr/local/go/bin:$HOME/go/bin:$PATH' >> "$USER_HOME/.profile"
 fi
