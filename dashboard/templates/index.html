@@ -170,11 +170,11 @@ canvas.sparkline{vertical-align:middle}
     <img src="/static/logo.png" alt="Solaxy" class="header-logo">
     <div>
       <h1>Solaxy Node Dashboard</h1>
-      <h2>ML1985DE-NODE</h2>
+      <h2 id="nodeHostname">-</h2>
     </div>
   </div>
   <div class="header-right">
-    <div>LAN: <span style="color:#58a6ff" id="lanIp">192.168.179.153</span></div>
+    <div>LAN: <span style="color:#58a6ff" id="lanIp">-</span></div>
     <div id="lastUpdate">-</div>
   </div>
 </div>
@@ -920,6 +920,8 @@ function updateNodeIdentity(data) {
   if (data.peer_id) document.getElementById('nodePeerId').textContent = data.peer_id;
   if (data.wallet) document.getElementById('nodeCelWallet').textContent = data.wallet;
   if (data.public_ip) document.getElementById('nodePublicIp').textContent = data.public_ip;
+  if (data.lan_ip) document.getElementById('lanIp').textContent = data.lan_ip;
+  if (data.hostname) document.getElementById('nodeHostname').textContent = data.hostname;
   if (data.tia_balance != null) {
     const tia = (parseInt(data.tia_balance) / 1e6).toFixed(2);
     document.getElementById('nodeTiaBalance').textContent = tia + ' TIA';

@@ -31,11 +31,15 @@ _cache = {}
 _cache_lock = threading.Lock()
 
 def _detect_celestia_mode():
-    """Detect whether we're running a celestia light or full node."""
-    # Check which store directory exists
+    """Detect which celestia node mode is running (bridge is default since v0.29.1)."""
+    if Path(os.path.expanduser("~/.celestia-bridge/keys")).exists():
+        return "bridge"
+    # Legacy installs may still have light or full
+    if Path(os.path.expanduser("~/.celestia-light/keys")).exists():
+        return "light"
     if Path(os.path.expanduser("~/.celestia-full/keys")).exists():
         return "full"
-    return "light"
+    return "bridge"
 
 CELESTIA_MODE = _detect_celestia_mode()
 CELESTIA_SERVICE = f"celestia-{CELESTIA_MODE}"
@@ -1456,6 +1460,15 @@ def api_attester_info():
 def node_identity():
     """Get node identity info from Celestia."""
     info = {}
+    # Hostname and LAN IP
+    info["hostname"] = socket.gethostname()
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        info["lan_ip"] = s.getsockname()[0]
+        s.close()
+    except Exception:
+        info["lan_ip"] = "127.0.0.1"
     # Peer ID
     raw = run_cmd(f"celestia p2p info --node.store {CELESTIA_STORE}")
     try:
