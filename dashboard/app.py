@@ -145,11 +145,11 @@ def _get_node_stats_for_map():
     else:
         synced_da = logs.get("synced_da_height", 0)
         target_da = logs.get("target_da_height", 0)
-        if synced_da > 0 and target_da > 0 and synced_da >= target_da:
+        if synced_da > 0 and target_da > 0 and (target_da - synced_da) <= 5:
+            # Within max_allowed_node_distance_behind (5) — node is synced
             sync_status = "synced"
         elif synced_da == 0 and target_da == 0:
             # No sync log lines found — node stopped logging "Sync in progress"
-            # which means it has caught up and is running live.
             sync_status = "synced"
         else:
             sync_status = "syncing"
