@@ -303,8 +303,30 @@ fi
 # ---------------------------------------------------------------------------
 # Step 5: Install Celestia Node (bridge)
 # ---------------------------------------------------------------------------
+NEED_CELESTIA_BUILD=false
 if ! command -v celestia &>/dev/null; then
-    log "Building Celestia node from source..."
+    NEED_CELESTIA_BUILD=true
+    log "Celestia not found, will build from source."
+else
+    INSTALLED_VERSION=$(celestia version 2>/dev/null | head -1 || echo "unknown")
+    # Extract semantic version (e.g. "0.29.1" from output like "v0.29.1" or "Semantic version: 0.29.1")
+    INSTALLED_SEM=$(echo "$INSTALLED_VERSION" | grep -oP '\d+\.\d+\.\d+' | head -1 || true)
+    REQUIRED_SEM=$(echo "$CELESTIA_VERSION" | grep -oP '\d+\.\d+\.\d+' || true)
+    if [[ "$INSTALLED_SEM" != "$REQUIRED_SEM" ]]; then
+        NEED_CELESTIA_BUILD=true
+        warn "Celestia version mismatch: installed=$INSTALLED_SEM, required=$REQUIRED_SEM"
+        log "Will rebuild Celestia ${CELESTIA_VERSION}..."
+        # Stop running Celestia service before upgrading binary
+        sudo systemctl stop celestia-bridge 2>/dev/null || true
+        sudo systemctl stop celestia-light 2>/dev/null || true
+        sudo systemctl stop celestia-full 2>/dev/null || true
+    else
+        log "Celestia already installed: ${INSTALLED_SEM}"
+    fi
+fi
+
+if $NEED_CELESTIA_BUILD; then
+    log "Building Celestia node ${CELESTIA_VERSION} from source..."
     cd /tmp
     rm -rf celestia-node
     git clone --depth 1 --branch "$CELESTIA_VERSION" "$CELESTIA_REPO"
@@ -314,8 +336,6 @@ if ! command -v celestia &>/dev/null; then
     cd "$USER_HOME"
     rm -rf /tmp/celestia-node
     log "Celestia installed: $(celestia version)"
-else
-    log "Celestia already installed: $(celestia version)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -344,13 +364,13 @@ if [[ ! -d "$CELESTIA_STORE/keys" ]]; then
     INIT_OUTPUT=$(celestia "$CELESTIA_MODE" init 2>&1)
     echo "$INIT_OUTPUT"
     log "Celestia ${CELESTIA_MODE} node initialized."
-
-    # Run config-update for v0.29.1+ (required after init for schema migration)
-    log "Running Celestia config-update..."
-    celestia "$CELESTIA_MODE" config-update --p2p.network celestia 2>&1 || true
 else
     warn "Celestia ${CELESTIA_MODE} node already initialized."
 fi
+
+# Run config-update (required after version upgrades for schema migration, safe to re-run)
+log "Running Celestia config-update..."
+celestia "$CELESTIA_MODE" config-update --p2p.network celestia 2>&1 || true
 
 # If SyncFromHeight was lowered below the existing store's value, re-init is needed
 if [[ -f "$CELESTIA_STORE/config.toml" && -d "$CELESTIA_STORE/data" && -n "$CELESTIA_SYNC_FROM_HEIGHT" ]]; then
@@ -363,21 +383,22 @@ if [[ -f "$CELESTIA_STORE/config.toml" && -d "$CELESTIA_STORE/data" && -n "$CELE
     fi
 fi
 
-# Configure Celestia pruning window and sync start point (only on fresh init)
-if [[ -f "$CELESTIA_STORE/config.toml" && ! -d "$CELESTIA_STORE/data" ]]; then
-    log "Configuring Celestia pruning window..."
-    sed -i "s|PruningWindow = .*|PruningWindow = \"${CELESTIA_PRUNING_WINDOW}\"|" "$CELESTIA_STORE/config.toml"
-    # SyncFromHeight/Hash for bridge node (v0.29.1+)
+# Always update Celestia config (pruning window, SyncFromHeight/Hash)
+# This ensures the config stays correct on re-install/upgrade.
+if [[ -f "$CELESTIA_STORE/config.toml" ]]; then
+    log "Configuring Celestia bridge node..."
+    if [[ -n "$CELESTIA_PRUNING_WINDOW" ]]; then
+        sed -i "s|PruningWindow = .*|PruningWindow = \"${CELESTIA_PRUNING_WINDOW}\"|" "$CELESTIA_STORE/config.toml"
+        log "PruningWindow set to ${CELESTIA_PRUNING_WINDOW}"
+    fi
     if [[ -n "$CELESTIA_SYNC_FROM_HEIGHT" && -n "$CELESTIA_SYNC_FROM_HASH" ]]; then
-        log "Setting Celestia sync start: height=$CELESTIA_SYNC_FROM_HEIGHT"
         sed -i "s|SyncFromHeight = .*|SyncFromHeight = ${CELESTIA_SYNC_FROM_HEIGHT}|" "$CELESTIA_STORE/config.toml"
         sed -i "s|SyncFromHash = .*|SyncFromHash = \"${CELESTIA_SYNC_FROM_HASH}\"|" "$CELESTIA_STORE/config.toml"
+        log "SyncFromHeight set to ${CELESTIA_SYNC_FROM_HEIGHT} (with hash)"
     elif [[ -n "$CELESTIA_SYNC_FROM_HEIGHT" ]]; then
-        log "Setting Celestia sync start: height=$CELESTIA_SYNC_FROM_HEIGHT (no hash)"
         sed -i "s|SyncFromHeight = .*|SyncFromHeight = ${CELESTIA_SYNC_FROM_HEIGHT}|" "$CELESTIA_STORE/config.toml"
+        log "SyncFromHeight set to ${CELESTIA_SYNC_FROM_HEIGHT} (no hash)"
     fi
-else
-    warn "Celestia already has data, keeping existing sync config."
 fi
 
 # Extract auth token
@@ -557,6 +578,18 @@ TMPL
     log "config.toml generated."
 else
     warn "config.toml already exists, keeping existing configuration."
+
+    # Always update rpc_auth_token to match the current Celestia store.
+    # On upgrade (e.g. light→bridge) the old token becomes invalid.
+    # With --rpc.skip-auth the token is technically not needed, but we
+    # keep it current for compatibility.
+    if [[ -n "$CELESTIA_AUTH_TOKEN" ]]; then
+        CURRENT_TOKEN=$(grep -oP 'rpc_auth_token\s*=\s*"\K[^"]+' "$USER_HOME/svm-rollup/config.toml" 2>/dev/null || true)
+        if [[ "$CURRENT_TOKEN" != "$CELESTIA_AUTH_TOKEN" ]]; then
+            log "Updating rpc_auth_token in config.toml (Celestia store changed)..."
+            sed -i "s|rpc_auth_token = \".*\"|rpc_auth_token = \"${CELESTIA_AUTH_TOKEN}\"|" "$USER_HOME/svm-rollup/config.toml"
+        fi
+    fi
 fi
 
 # ---------------------------------------------------------------------------
