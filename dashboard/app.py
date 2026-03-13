@@ -1460,6 +1460,15 @@ def api_attester_info():
 def node_identity():
     """Get node identity info from Celestia."""
     info = {}
+    # Hostname and LAN IP
+    info["hostname"] = socket.gethostname()
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        info["lan_ip"] = s.getsockname()[0]
+        s.close()
+    except Exception:
+        info["lan_ip"] = "127.0.0.1"
     # Peer ID
     raw = run_cmd(f"celestia p2p info --node.store {CELESTIA_STORE}")
     try:
