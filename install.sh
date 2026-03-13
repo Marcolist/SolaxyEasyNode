@@ -306,13 +306,15 @@ if $NEED_GO_INSTALL; then
     log "Extracting Go..."
     pv "go${GO_VERSION}.linux-amd64.tar.gz" | sudo tar -C /usr/local -xzf - 2>/dev/null || sudo tar -C /usr/local -xzf "go${GO_VERSION}.linux-amd64.tar.gz"
     rm -f "go${GO_VERSION}.linux-amd64.tar.gz"
-    log "Go installed: $(go version 2>/dev/null || echo ${GO_VERSION})"
 fi
 
-export PATH=$PATH:/usr/local/go/bin:$USER_HOME/go/bin
+# Ensure /usr/local/go/bin is FIRST in PATH so it takes priority over any
+# system-packaged Go (e.g. /usr/bin/go from apt)
+export PATH=/usr/local/go/bin:$USER_HOME/go/bin:$PATH
 if ! grep -q '/usr/local/go/bin' "$USER_HOME/.profile" 2>/dev/null; then
-    echo 'export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin' >> "$USER_HOME/.profile"
+    echo 'export PATH=/usr/local/go/bin:$HOME/go/bin:$PATH' >> "$USER_HOME/.profile"
 fi
+log "Using Go: $(go version)"
 
 # ---------------------------------------------------------------------------
 # Step 5: Install Celestia Node (bridge)
