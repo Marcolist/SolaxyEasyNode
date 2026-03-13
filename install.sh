@@ -290,7 +290,8 @@ else
     INSTALLED_GO=$(go version | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "0.0.0")
     REQUIRED_GO_MINOR=$(echo "$GO_VERSION" | cut -d. -f1-2)
     INSTALLED_GO_MINOR=$(echo "$INSTALLED_GO" | cut -d. -f1-2)
-    if [[ "$(printf '%s\n' "$REQUIRED_GO_MINOR" "$INSTALLED_GO_MINOR" | sort -V | head -1)" != "$REQUIRED_GO_MINOR" ]]; then
+    # sort -V puts smallest first; if installed is the smallest AND differs from required, it's too old
+    if [[ "$(printf '%s\n' "$REQUIRED_GO_MINOR" "$INSTALLED_GO_MINOR" | sort -V | head -1)" == "$REQUIRED_GO_MINOR" ]]; then
         log "Go already at ${INSTALLED_GO} (>= ${GO_VERSION})."
     else
         NEED_GO_INSTALL=true
