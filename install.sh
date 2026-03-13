@@ -557,6 +557,18 @@ TMPL
     log "config.toml generated."
 else
     warn "config.toml already exists, keeping existing configuration."
+
+    # Always update rpc_auth_token to match the current Celestia store.
+    # On upgrade (e.g. light→bridge) the old token becomes invalid.
+    # With --rpc.skip-auth the token is technically not needed, but we
+    # keep it current for compatibility.
+    if [[ -n "$CELESTIA_AUTH_TOKEN" ]]; then
+        CURRENT_TOKEN=$(grep -oP 'rpc_auth_token\s*=\s*"\K[^"]+' "$USER_HOME/svm-rollup/config.toml" 2>/dev/null || true)
+        if [[ "$CURRENT_TOKEN" != "$CELESTIA_AUTH_TOKEN" ]]; then
+            log "Updating rpc_auth_token in config.toml (Celestia store changed)..."
+            sed -i "s|rpc_auth_token = \".*\"|rpc_auth_token = \"${CELESTIA_AUTH_TOKEN}\"|" "$USER_HOME/svm-rollup/config.toml"
+        fi
+    fi
 fi
 
 # ---------------------------------------------------------------------------
