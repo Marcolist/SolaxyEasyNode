@@ -303,8 +303,30 @@ fi
 # ---------------------------------------------------------------------------
 # Step 5: Install Celestia Node (bridge)
 # ---------------------------------------------------------------------------
+NEED_CELESTIA_BUILD=false
 if ! command -v celestia &>/dev/null; then
-    log "Building Celestia node from source..."
+    NEED_CELESTIA_BUILD=true
+    log "Celestia not found, will build from source."
+else
+    INSTALLED_VERSION=$(celestia version 2>/dev/null | head -1 || echo "unknown")
+    # Extract semantic version (e.g. "0.29.1" from output like "v0.29.1" or "Semantic version: 0.29.1")
+    INSTALLED_SEM=$(echo "$INSTALLED_VERSION" | grep -oP '\d+\.\d+\.\d+' | head -1 || true)
+    REQUIRED_SEM=$(echo "$CELESTIA_VERSION" | grep -oP '\d+\.\d+\.\d+' || true)
+    if [[ "$INSTALLED_SEM" != "$REQUIRED_SEM" ]]; then
+        NEED_CELESTIA_BUILD=true
+        warn "Celestia version mismatch: installed=$INSTALLED_SEM, required=$REQUIRED_SEM"
+        log "Will rebuild Celestia ${CELESTIA_VERSION}..."
+        # Stop running Celestia service before upgrading binary
+        sudo systemctl stop celestia-bridge 2>/dev/null || true
+        sudo systemctl stop celestia-light 2>/dev/null || true
+        sudo systemctl stop celestia-full 2>/dev/null || true
+    else
+        log "Celestia already installed: ${INSTALLED_SEM}"
+    fi
+fi
+
+if $NEED_CELESTIA_BUILD; then
+    log "Building Celestia node ${CELESTIA_VERSION} from source..."
     cd /tmp
     rm -rf celestia-node
     git clone --depth 1 --branch "$CELESTIA_VERSION" "$CELESTIA_REPO"
@@ -314,8 +336,6 @@ if ! command -v celestia &>/dev/null; then
     cd "$USER_HOME"
     rm -rf /tmp/celestia-node
     log "Celestia installed: $(celestia version)"
-else
-    log "Celestia already installed: $(celestia version)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -344,13 +364,13 @@ if [[ ! -d "$CELESTIA_STORE/keys" ]]; then
     INIT_OUTPUT=$(celestia "$CELESTIA_MODE" init 2>&1)
     echo "$INIT_OUTPUT"
     log "Celestia ${CELESTIA_MODE} node initialized."
-
-    # Run config-update for v0.29.1+ (required after init for schema migration)
-    log "Running Celestia config-update..."
-    celestia "$CELESTIA_MODE" config-update --p2p.network celestia 2>&1 || true
 else
     warn "Celestia ${CELESTIA_MODE} node already initialized."
 fi
+
+# Run config-update (required after version upgrades for schema migration, safe to re-run)
+log "Running Celestia config-update..."
+celestia "$CELESTIA_MODE" config-update --p2p.network celestia 2>&1 || true
 
 # If SyncFromHeight was lowered below the existing store's value, re-init is needed
 if [[ -f "$CELESTIA_STORE/config.toml" && -d "$CELESTIA_STORE/data" && -n "$CELESTIA_SYNC_FROM_HEIGHT" ]]; then
