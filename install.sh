@@ -14,7 +14,7 @@ CELESTIA_CORE_PORT="9090"
 CELESTIA_GRPC="http://${CELESTIA_CORE_IP}:${CELESTIA_CORE_PORT}"
 CELESTIA_REPO="https://github.com/celestiaorg/celestia-node.git"
 CELESTIA_VERSION="v0.29.1-mocha"
-GO_VERSION="1.26"
+GO_VERSION="1.26.1"
 
 CELESTIA_PRUNING_WINDOW=""  # calculated dynamically after genesis DA height is known
 

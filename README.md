@@ -59,7 +59,7 @@ SolaxyEasyNode reduces setup time and provides a production-ready dashboard + Te
 | **svm-rollup** | Solaxy SVM Rollup full node |
 | **Celestia Bridge Node** | DA layer bridge node (Mainnet, with pruning) |
 | **PostgreSQL** | Database for blocks, transactions, accounts |
-| **Go 1.26** | Required to build Celestia v0.29.1-mocha from source |
+| **Go 1.26.1** | Required to build Celestia v0.29.1-mocha from source |
 | **Dashboard** | Web UI at `http://<LAN_IP>:5555` |
 
 ### Celestia Bridge Node
