@@ -363,21 +363,22 @@ if [[ -f "$CELESTIA_STORE/config.toml" && -d "$CELESTIA_STORE/data" && -n "$CELE
     fi
 fi
 
-# Configure Celestia pruning window and sync start point (only on fresh init)
-if [[ -f "$CELESTIA_STORE/config.toml" && ! -d "$CELESTIA_STORE/data" ]]; then
-    log "Configuring Celestia pruning window..."
-    sed -i "s|PruningWindow = .*|PruningWindow = \"${CELESTIA_PRUNING_WINDOW}\"|" "$CELESTIA_STORE/config.toml"
-    # SyncFromHeight/Hash for bridge node (v0.29.1+)
+# Always update Celestia config (pruning window, SyncFromHeight/Hash)
+# This ensures the config stays correct on re-install/upgrade.
+if [[ -f "$CELESTIA_STORE/config.toml" ]]; then
+    log "Configuring Celestia bridge node..."
+    if [[ -n "$CELESTIA_PRUNING_WINDOW" ]]; then
+        sed -i "s|PruningWindow = .*|PruningWindow = \"${CELESTIA_PRUNING_WINDOW}\"|" "$CELESTIA_STORE/config.toml"
+        log "PruningWindow set to ${CELESTIA_PRUNING_WINDOW}"
+    fi
     if [[ -n "$CELESTIA_SYNC_FROM_HEIGHT" && -n "$CELESTIA_SYNC_FROM_HASH" ]]; then
-        log "Setting Celestia sync start: height=$CELESTIA_SYNC_FROM_HEIGHT"
         sed -i "s|SyncFromHeight = .*|SyncFromHeight = ${CELESTIA_SYNC_FROM_HEIGHT}|" "$CELESTIA_STORE/config.toml"
         sed -i "s|SyncFromHash = .*|SyncFromHash = \"${CELESTIA_SYNC_FROM_HASH}\"|" "$CELESTIA_STORE/config.toml"
+        log "SyncFromHeight set to ${CELESTIA_SYNC_FROM_HEIGHT} (with hash)"
     elif [[ -n "$CELESTIA_SYNC_FROM_HEIGHT" ]]; then
-        log "Setting Celestia sync start: height=$CELESTIA_SYNC_FROM_HEIGHT (no hash)"
         sed -i "s|SyncFromHeight = .*|SyncFromHeight = ${CELESTIA_SYNC_FROM_HEIGHT}|" "$CELESTIA_STORE/config.toml"
+        log "SyncFromHeight set to ${CELESTIA_SYNC_FROM_HEIGHT} (no hash)"
     fi
-else
-    warn "Celestia already has data, keeping existing sync config."
 fi
 
 # Extract auth token
