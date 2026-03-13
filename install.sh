@@ -282,22 +282,35 @@ fi
 # ---------------------------------------------------------------------------
 # Step 4: Install Go (needed for Celestia)
 # ---------------------------------------------------------------------------
+NEED_GO_INSTALL=false
 if ! command -v go &>/dev/null; then
+    NEED_GO_INSTALL=true
+    log "Go not found, will install ${GO_VERSION}."
+else
+    INSTALLED_GO=$(go version | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "0.0.0")
+    REQUIRED_GO_MINOR=$(echo "$GO_VERSION" | cut -d. -f1-2)
+    INSTALLED_GO_MINOR=$(echo "$INSTALLED_GO" | cut -d. -f1-2)
+    if [[ "$(printf '%s\n' "$REQUIRED_GO_MINOR" "$INSTALLED_GO_MINOR" | sort -V | head -1)" != "$REQUIRED_GO_MINOR" ]]; then
+        log "Go already at ${INSTALLED_GO} (>= ${GO_VERSION})."
+    else
+        NEED_GO_INSTALL=true
+        warn "Go ${INSTALLED_GO} is too old (need >= ${GO_VERSION}). Upgrading..."
+    fi
+fi
+
+if $NEED_GO_INSTALL; then
     log "Installing Go ${GO_VERSION}..."
     curl -L# "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o "go${GO_VERSION}.linux-amd64.tar.gz"
     sudo rm -rf /usr/local/go
     log "Extracting Go..."
     pv "go${GO_VERSION}.linux-amd64.tar.gz" | sudo tar -C /usr/local -xzf - 2>/dev/null || sudo tar -C /usr/local -xzf "go${GO_VERSION}.linux-amd64.tar.gz"
     rm -f "go${GO_VERSION}.linux-amd64.tar.gz"
-    export PATH=$PATH:/usr/local/go/bin:$USER_HOME/go/bin
-    # Persist PATH
-    if ! grep -q '/usr/local/go/bin' "$USER_HOME/.profile" 2>/dev/null; then
-        echo 'export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin' >> "$USER_HOME/.profile"
-    fi
-    log "Go installed."
-else
-    log "Go already installed: $(go version)"
-    export PATH=$PATH:/usr/local/go/bin:$USER_HOME/go/bin
+    log "Go installed: $(go version 2>/dev/null || echo ${GO_VERSION})"
+fi
+
+export PATH=$PATH:/usr/local/go/bin:$USER_HOME/go/bin
+if ! grep -q '/usr/local/go/bin' "$USER_HOME/.profile" 2>/dev/null; then
+    echo 'export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin' >> "$USER_HOME/.profile"
 fi
 
 # ---------------------------------------------------------------------------
