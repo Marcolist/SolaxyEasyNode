@@ -299,9 +299,10 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
         esac
 
         USE_CELESTIA_BRIDGE=true
-        CELESTIA_SYNC_FROM_HEIGHT=9800000
-        CELESTIA_PRUNING_WINDOW="168h0m0s"   # 7 days — keep disk usage low
-        log "Celestia Bridge Node mode enabled (SyncFromHeight: $CELESTIA_SYNC_FROM_HEIGHT, pruning: 168h)."
+        # Use genesis DA height as sync start (no need to sync earlier blocks)
+        CELESTIA_SYNC_FROM_HEIGHT=$GENESIS_DA_HEIGHT
+        CELESTIA_PRUNING_WINDOW="169h0m0s"   # ~7 days — enough for rollup catch-up
+        log "Celestia Bridge Node mode enabled (SyncFromHeight: $CELESTIA_SYNC_FROM_HEIGHT, pruning: 169h)."
     fi
 
     # Fetch the block hash from Celestia consensus RPC
@@ -408,6 +409,17 @@ if [[ ! -d "$CELESTIA_STORE/keys" ]]; then
     celestia "$CELESTIA_MODE" config-update --p2p.network celestia 2>&1 || true
 else
     warn "Celestia ${CELESTIA_MODE} node already initialized."
+fi
+
+# If SyncFromHeight was lowered below the existing store's value, re-init is needed
+if [[ -f "$CELESTIA_STORE/config.toml" && -d "$CELESTIA_STORE/data" && -n "$CELESTIA_SYNC_FROM_HEIGHT" ]]; then
+    CURRENT_SYNC=$(grep 'SyncFromHeight' "$CELESTIA_STORE/config.toml" | awk '{print $3}' | head -1)
+    if [[ -n "$CURRENT_SYNC" && "$CELESTIA_SYNC_FROM_HEIGHT" -lt "$CURRENT_SYNC" ]] 2>/dev/null; then
+        warn "SyncFromHeight lowered ($CURRENT_SYNC -> $CELESTIA_SYNC_FROM_HEIGHT). Re-initializing store..."
+        rm -rf "$CELESTIA_STORE/blocks" "$CELESTIA_STORE/data"
+        celestia "$CELESTIA_MODE" init --p2p.network celestia 2>&1 || true
+        celestia "$CELESTIA_MODE" config-update --p2p.network celestia 2>&1 || true
+    fi
 fi
 
 # Configure Celestia pruning window and sync start point (only on fresh init)
@@ -672,7 +684,15 @@ EOF
             ;;
             celestia-light.service|celestia-bridge.service|celestia-full.service)
                 local cel_mode="${name%.service}"     # celestia-light or celestia-full
-                cel_mode="${cel_mode#celestia-}"       # light or full
+                cel_mode="${cel_mode#celestia-}"       # light, full, or bridge
+                local extra_flags=""
+                local svc_restart="on-failure"
+                local svc_restart_sec="10"
+                if [[ "$cel_mode" == "bridge" ]]; then
+                    extra_flags=" --p2p.network celestia --rpc.skip-auth"
+                    svc_restart="always"
+                    svc_restart_sec="5"
+                fi
 cat > "$tmp" << EOF
 [Unit]
 Description=Celestia ${cel_mode^} Node
@@ -682,9 +702,9 @@ Wants=network-online.target
 [Service]
 User=${USER_NAME}
 Type=simple
-ExecStart=/usr/local/bin/celestia ${cel_mode} start --core.ip ${CELESTIA_CORE_IP} --core.port ${CELESTIA_CORE_PORT} --keyring.keyname my_celes_key
-Restart=on-failure
-RestartSec=10
+ExecStart=/usr/local/bin/celestia ${cel_mode} start --core.ip ${CELESTIA_CORE_IP} --core.port ${CELESTIA_CORE_PORT} --keyring.keyname my_celes_key${extra_flags}
+Restart=${svc_restart}
+RestartSec=${svc_restart_sec}
 LimitNOFILE=65535
 
 [Install]
@@ -749,6 +769,16 @@ elif command -v firewall-cmd &>/dev/null; then
     log "Firewall port 5555 opened."
 else
     warn "No firewall tool (ufw/firewalld) found. Ensure port 5555 is accessible."
+fi
+
+# Pre-flight: check core endpoint reachability
+if command -v nc &>/dev/null; then
+    if ! timeout 5 bash -c "echo | nc -w 3 ${CELESTIA_CORE_IP} ${CELESTIA_CORE_PORT}" 2>/dev/null; then
+        warn "Core endpoint ${CELESTIA_CORE_IP}:${CELESTIA_CORE_PORT} not reachable. Bridge node may fail to start."
+        warn "If the endpoint requires TLS, add --core.tls to the service ExecStart line."
+    else
+        log "Core endpoint ${CELESTIA_CORE_IP}:${CELESTIA_CORE_PORT} is reachable."
+    fi
 fi
 
 # Start services (start is a no-op if already running; restart dashboard to pick up new files)
