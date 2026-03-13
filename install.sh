@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # SolaxyEasyNode — One-Line Installer
-# Sets up: SVM Rollup + Celestia Node (light or full) + PostgreSQL + Dashboard
+# Sets up: SVM Rollup + Celestia Bridge Node + PostgreSQL + Dashboard
 #
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main/install.sh | bash
@@ -17,7 +17,6 @@ CELESTIA_VERSION="v0.29.1"
 GO_VERSION="1.26"
 
 CELESTIA_PRUNING_WINDOW=""  # calculated dynamically after genesis DA height is known
-USE_CELESTIA_BRIDGE=false   # set to true automatically when state export is too old for light node
 
 USER_NAME="$(whoami)"
 USER_HOME="$HOME"
@@ -261,49 +260,9 @@ if [[ -n "$GENESIS_DA_HEIGHT" && "$GENESIS_DA_HEIGHT" -gt 0 ]] 2>/dev/null; then
         warn "Could not fetch Celestia head height, using default pruning window (720h)"
     fi
 
-    # Start syncing a few thousand blocks before genesis to have a margin
-    CELESTIA_SYNC_FROM_HEIGHT=$((GENESIS_DA_HEIGHT - 26000))
+    # Use genesis DA height as sync start — no need to sync earlier blocks
+    CELESTIA_SYNC_FROM_HEIGHT=$GENESIS_DA_HEIGHT
     log "Genesis DA height: $GENESIS_DA_HEIGHT — Celestia will sync from $CELESTIA_SYNC_FROM_HEIGHT"
-
-    # Check if the required blocks are still available on the Celestia network.
-    # Our local pruning window controls what we RETAIN after sync, but for the
-    # initial sync we depend on what other light/bridge nodes still have.
-    # Celestia light nodes typically keep ~7-9 days of blocks.  We use a
-    # conservative estimate of 8 days (~62,836 blocks at 11s/block) to decide
-    # whether the needed blocks are likely still available from network peers.
-    CELESTIA_NET_AVAIL_HOURS=192   # 8 days — conservative light-node availability
-    ESTIMATED_TAIL=$((CELESTIA_CURRENT_HEAD - (CELESTIA_NET_AVAIL_HOURS * 3600 / 11)))
-    if [[ "$CELESTIA_SYNC_FROM_HEIGHT" -lt "$ESTIMATED_TAIL" ]]; then
-        echo ""
-        echo -e "${YELLOW}============================================================${NC}"
-        echo -e "${YELLOW}  Solaxy state export requires historical Celestia blocks${NC}"
-        echo -e "${YELLOW}============================================================${NC}"
-        echo ""
-        echo -e "  Genesis DA Height:              ${YELLOW}${GENESIS_DA_HEIGHT}${NC}"
-        echo -e "  Required sync start:            ${YELLOW}${CELESTIA_SYNC_FROM_HEIGHT}${NC}"
-        echo -e "  Celestia tail (estimated, ~8d):  ${YELLOW}${ESTIMATED_TAIL}${NC}"
-        echo -e "  Celestia head:                  ${CYAN}${CELESTIA_CURRENT_HEAD}${NC}"
-        echo ""
-        echo -e "  A Celestia Light Node only keeps ~8 days of blocks."
-        echo -e "  A ${CYAN}Celestia Bridge Node${NC} with SyncFromHeight will be used instead."
-        echo -e "  Bridge nodes support pruning to keep disk usage low."
-        echo ""
-        echo -e "  ${YELLOW}Note: Bridge Node needs ~4-8 GB RAM and ~20-50 GB disk.${NC}"
-        echo -e "  Initial sync may take several hours."
-        echo ""
-        read -rp "  Install Celestia Bridge Node for sync? [Y/n] " answer </dev/tty
-        case "${answer,,}" in
-            n|no)
-                err "Cannot continue — state export too old for light node and bridge node declined."
-                ;;
-        esac
-
-        USE_CELESTIA_BRIDGE=true
-        # Use genesis DA height as sync start (no need to sync earlier blocks)
-        CELESTIA_SYNC_FROM_HEIGHT=$GENESIS_DA_HEIGHT
-        CELESTIA_PRUNING_WINDOW="169h0m0s"   # ~7 days — enough for rollup catch-up
-        log "Celestia Bridge Node mode enabled (SyncFromHeight: $CELESTIA_SYNC_FROM_HEIGHT, pruning: 169h)."
-    fi
 
     # Fetch the block hash from Celestia consensus RPC
     CELESTIA_SYNC_FROM_HASH=$(curl -s "https://${CELESTIA_CORE_IP}/header?height=${CELESTIA_SYNC_FROM_HEIGHT}" \
@@ -342,7 +301,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5: Install Celestia Node (light or bridge)
+# Step 5: Install Celestia Node (bridge)
 # ---------------------------------------------------------------------------
 if ! command -v celestia &>/dev/null; then
     log "Building Celestia node from source..."
@@ -362,39 +321,21 @@ fi
 # ---------------------------------------------------------------------------
 # Step 6: Init Celestia node & extract auth token
 # ---------------------------------------------------------------------------
-# Select node type based on whether bridge node is needed
-if $USE_CELESTIA_BRIDGE; then
-    CELESTIA_MODE="bridge"
-    CELESTIA_STORE="$USER_HOME/.celestia-bridge"
-    CELESTIA_SERVICE_NAME="celestia-bridge"
-else
-    CELESTIA_MODE="light"
-    CELESTIA_STORE="$USER_HOME/.celestia-light"
-    CELESTIA_SERVICE_NAME="celestia-light"
-fi
+# Bridge mode is the only supported Celestia mode
+CELESTIA_MODE="bridge"
+CELESTIA_STORE="$USER_HOME/.celestia-bridge"
+CELESTIA_SERVICE_NAME="celestia-bridge"
 
-# Clean up old mode services if switching (e.g. light→bridge or old full→bridge on re-run)
-if $USE_CELESTIA_BRIDGE; then
-    for old_svc in celestia-light.service celestia-full.service; do
-        if systemctl is-enabled --quiet "$old_svc" 2>/dev/null; then
-            warn "Switching to Celestia bridge. Stopping old ${old_svc}..."
-            sudo systemctl stop "$old_svc" 2>/dev/null || true
-            sudo systemctl disable "$old_svc" 2>/dev/null || true
-            sudo rm -f "/etc/systemd/system/${old_svc}"
-            sudo systemctl daemon-reload
-        fi
-    done
-else
-    for old_svc in celestia-bridge.service celestia-full.service; do
-        if systemctl is-enabled --quiet "$old_svc" 2>/dev/null; then
-            warn "Switching to Celestia light. Stopping old ${old_svc}..."
-            sudo systemctl stop "$old_svc" 2>/dev/null || true
-            sudo systemctl disable "$old_svc" 2>/dev/null || true
-            sudo rm -f "/etc/systemd/system/${old_svc}"
-            sudo systemctl daemon-reload
-        fi
-    done
-fi
+# Clean up old light/full services from previous installs
+for old_svc in celestia-light.service celestia-full.service; do
+    if systemctl is-enabled --quiet "$old_svc" 2>/dev/null; then
+        warn "Removing old ${old_svc} (replaced by bridge)..."
+        sudo systemctl stop "$old_svc" 2>/dev/null || true
+        sudo systemctl disable "$old_svc" 2>/dev/null || true
+        sudo rm -f "/etc/systemd/system/${old_svc}"
+        sudo systemctl daemon-reload
+    fi
+done
 
 log "Celestia mode: ${CELESTIA_MODE}"
 
@@ -426,7 +367,7 @@ fi
 if [[ -f "$CELESTIA_STORE/config.toml" && ! -d "$CELESTIA_STORE/data" ]]; then
     log "Configuring Celestia pruning window..."
     sed -i "s|PruningWindow = .*|PruningWindow = \"${CELESTIA_PRUNING_WINDOW}\"|" "$CELESTIA_STORE/config.toml"
-    # SyncFromHeight/Hash applies to both light and bridge nodes (v0.29.1+)
+    # SyncFromHeight/Hash for bridge node (v0.29.1+)
     if [[ -n "$CELESTIA_SYNC_FROM_HEIGHT" && -n "$CELESTIA_SYNC_FROM_HASH" ]]; then
         log "Setting Celestia sync start: height=$CELESTIA_SYNC_FROM_HEIGHT"
         sed -i "s|SyncFromHeight = .*|SyncFromHeight = ${CELESTIA_SYNC_FROM_HEIGHT}|" "$CELESTIA_STORE/config.toml"
