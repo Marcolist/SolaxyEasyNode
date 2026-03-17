@@ -75,11 +75,72 @@ The installer uses a Celestia Bridge Node in pruning mode. The `SyncFromHeight` 
 | **Pruning** | Dynamic — covers genesis-to-head + 48h buffer (min 720h) |
 | **RPC Auth** | Skipped (`--rpc.skip-auth`) for stable rollup connection |
 
+## Wallet, Rewards & Bond
+
+Each node generates a Solana keypair (`~/svm-rollup/node-wallet.json`) during installation. This wallet is used for:
+
+- **Prover rewards** — configured as `prover_address` in `config.toml`
+- **Sequencer identity** — configured as `rollup_address` in `config.toml`
+- **Operator incentives** — configured as `reward_address` in `genesis/operator_incentives.json`
+
+### Bond Requirements
+
+To participate as a sequencer or prover, the wallet must be funded **on the Solaxy rollup** (not on Solana mainnet):
+
+| Role | Minimum Bond | Purpose |
+|---|---|---|
+| **Sequencer** | 10,000 SOLX | Registration bond for standard sequencer |
+| **Prover (ZK)** | 200,000 SOLX | Bond for generating ZK proofs |
+| **Total** | **220,000 SOLX** | Minimum to register as both |
+
+The bond is posted automatically when the node syncs genesis with the correct wallet configured.
+
+### Wallet Setup (New Install)
+
+The installer automatically configures all three files with your node wallet. No manual steps needed.
+
+### Wallet Setup (Existing Install)
+
+If your node was installed before this update, the config may still use the default team wallet. You have two options:
+
+**Option A — Dashboard (recommended):**
+Open the dashboard and look for the **Wallet & Bond Status** panel. If a mismatch is detected, click **"Apply Wallet & Resync Now"**.
+
+**Option B — Re-run the installer:**
+```bash
+curl -sSL https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main/install.sh | bash
+```
+The installer detects the old wallet and offers to update + resync.
+
+> **Warning:** Changing the wallet requires a full data wipe and resync from genesis. The node will re-import the 20 GB state export and sync all blocks from scratch. This can take several hours depending on your hardware.
+
+### Verify Wallet Configuration
+
+```bash
+# Check which wallet is configured
+grep -E "prover_address|rollup_address" ~/svm-rollup/config.toml
+cat ~/svm-rollup/genesis/operator_incentives.json
+
+# Check your node wallet address
+python3 -c "
+import json
+alphabet = b'123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+def b58(data):
+    n = int.from_bytes(data, 'big'); r = b''
+    while n > 0: n, m = divmod(n, 58); r = alphabet[m:m+1] + r
+    return r.decode()
+print(b58(bytes(json.load(open('$HOME/svm-rollup/node-wallet.json'))[32:])))
+"
+```
+
+All three addresses should match your node wallet.
+
 ## After Installation
 
 - **Dashboard**: `http://<your-ip>:5555`
 - **RPC Endpoint**: `http://127.0.0.1:8899`
 - **Config**: `~/svm-rollup/config.toml` (also editable from the dashboard Settings panel)
+- **Node Wallet**: `~/svm-rollup/node-wallet.json`
 - **Logs**: `journalctl -u solaxy-node -f`
 
 ### Service Management
