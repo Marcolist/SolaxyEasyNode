@@ -165,8 +165,35 @@ Or use the **Settings** panel in the dashboard to start/stop/restart services.
 - PostgreSQL stats (blocks, transactions, accounts)
 - Server resource monitoring (CPU, memory, disk, network)
 - Node identity and wallet info (LAN IP, hostname, public IP)
+- Wallet & bond status with one-click resync
 - Reward model & node roles reference
 - **Settings panel**: Edit all `config.toml` values and manage services from the UI
+
+## Network Map Integration
+
+The dashboard sends periodic heartbeats to the [Public Validator Map](https://map.orbitnode.dev). The heartbeat payload includes:
+
+```json
+{
+  "sync_status": "synced | syncing | offline",
+  "uptime_seconds": 86400,
+  "slot": 21093341,
+  "da_height": 10259382,
+  "configured_wallet": "351wxoAtyTjJV63h2gru4YrPmZWwBZRonJe5Z3Bxkt97",
+  "bond_status": "bonded | unbonded | not_configured | unknown",
+  "roles": ["sequencer", "prover"]
+}
+```
+
+| Field | Description |
+|---|---|
+| `sync_status` | Node sync state (`synced`, `syncing`, `offline`) |
+| `uptime_seconds` | Seconds since solaxy-node service started |
+| `slot` | Current SVM slot number |
+| `da_height` | Current synced DA (Celestia) block height |
+| `configured_wallet` | The wallet address configured for rewards/bond |
+| `bond_status` | `bonded` (sufficient SOLX for at least one role), `unbonded` (wallet configured but insufficient funds), `not_configured` (still using team wallet), `unknown` (could not check) |
+| `roles` | Active roles based on balance: `sequencer` (>=10k SOLX), `prover` (>=200k SOLX) |
 
 ## Requirements
 

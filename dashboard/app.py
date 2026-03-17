@@ -180,11 +180,40 @@ def _get_node_stats_for_map():
         with _block_stats_lock:
             da_height = _block_stats.get("last_da") or 0
 
+    # Wallet & bond info
+    configured_wallet = ""
+    bond_status = "unknown"
+    roles = []
+    try:
+        cfg = parse_config()
+        configured_wallet = cfg.get("proof_manager", {}).get("prover_address", "")
+
+        if configured_wallet and configured_wallet != SOLAXY_TEAM_WALLET:
+            # Node has its own wallet configured — check SOLX balance as bond indicator
+            balance_result = _rpc_call(PUBLIC_RPC, "getBalance", [configured_wallet])
+            if balance_result and isinstance(balance_result, dict):
+                lamports = balance_result.get("value", 0)
+                solx = lamports / 1e6
+                if solx >= 200_000:
+                    roles.append("prover")
+                if solx >= 10_000:
+                    roles.append("sequencer")
+                bond_status = "bonded" if roles else "unbonded"
+            else:
+                bond_status = "unknown"
+        elif configured_wallet == SOLAXY_TEAM_WALLET:
+            bond_status = "not_configured"
+    except Exception:
+        pass
+
     return {
         "sync_status": sync_status,
         "uptime_seconds": uptime_seconds,
         "slot": slot,
         "da_height": da_height,
+        "configured_wallet": configured_wallet,
+        "bond_status": bond_status,
+        "roles": roles,
     }
 
 
