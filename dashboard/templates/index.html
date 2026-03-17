@@ -437,11 +437,44 @@ canvas.sparkline{vertical-align:middle}
     <div class="role-title">Operator Incentives</div>
     <div>Reward distribution to a designated address for operating the rollup.</div>
     <div class="info-grid" style="margin-top:6px">
-      <div class="info-row"><span class="info-key">Reward Address</span><span class="info-val mono" style="font-size:10px">HjjEhif8..oxbcECv</span></div>
+      <div class="info-row"><span class="info-key">Reward Address</span><span class="info-val mono" style="font-size:10px" id="infoOperatorAddr">-</span></div>
     </div>
   </div>
 
-  <h4>This Node's Status</h4>
+  <h4>This Node's Wallet &amp; Bond Status</h4>
+  <div id="walletStatusBox">
+    <div class="info-grid">
+      <div class="info-row"><span class="info-key">Node Wallet</span><span class="info-val mono" style="font-size:10px" id="bondNodeWallet">-</span></div>
+      <div class="info-row"><span class="info-key">Config Wallet</span><span class="info-val mono" style="font-size:10px" id="bondConfigWallet">-</span></div>
+      <div class="info-row"><span class="info-key">Wallet Status</span><span class="info-val" id="bondWalletStatus">Checking...</span></div>
+    </div>
+  </div>
+
+  <div id="walletWarning" style="display:none; background:#3a2000; border:1px solid #ff9800; border-radius:6px; padding:12px; margin:10px 0">
+    <div style="color:#ff9800; font-weight:600; margin-bottom:6px">&#9888; Wallet Mismatch — Resync Required</div>
+    <div style="color:#ccc; font-size:13px; line-height:1.5">
+      Your config still uses the default team wallet. To receive prover/sequencer rewards,
+      your node wallet must be configured and the node data must be wiped so genesis is
+      re-imported with your wallet address.<br><br>
+      <strong>This will stop the node and delete all synced data.</strong>
+      The node will re-sync from scratch (this may take several hours).
+    </div>
+    <div style="margin-top:10px; display:flex; gap:8px">
+      <button class="btn btn-sm btn-danger" onclick="applyWalletResync()" id="btnResync">Apply Wallet &amp; Resync Now</button>
+      <button class="btn btn-sm btn-secondary" onclick="applyWalletOnly()">Apply Wallet Only (no resync)</button>
+    </div>
+    <div id="resyncResult" style="margin-top:8px; display:none"></div>
+  </div>
+
+  <div id="walletOk" style="display:none; background:#0a2e0a; border:1px solid #4caf50; border-radius:6px; padding:12px; margin:10px 0">
+    <div style="color:#4caf50; font-weight:600">&#10003; Wallet configured correctly</div>
+    <div style="color:#aaa; font-size:12px; margin-top:4px">
+      Bond requirements: 10,000 SOLX (Sequencer) + 200,000 SOLX (Prover) = 220,000 SOLX total.
+      Ensure your wallet is funded on the rollup.
+    </div>
+  </div>
+
+  <h4 style="margin-top:16px">Attestation Status</h4>
   <div class="info-grid">
     <div class="info-row"><span class="info-key">Role</span><span class="info-val">Standard Sequencer (Full Node)</span></div>
     <div class="info-row"><span class="info-key">Registered as Attester</span><span class="info-val red">No</span></div>
@@ -453,7 +486,7 @@ canvas.sparkline{vertical-align:middle}
   <div class="info-note">
     The attester/prover incentive system is implemented in the code but not yet open for external participants.
     Currently only the preferred sequencer (Solaxy team) produces blocks. Registration is expected to be enabled in a later phase.
-    Until then: keep the node synced and wait.
+    Until then: keep the node synced, ensure your wallet is configured, and wait.
   </div>
 </div>
 
@@ -516,14 +549,14 @@ canvas.sparkline{vertical-align:middle}
   <h4>Proof Manager</h4>
   <div class="cfg-grid">
     <div class="cfg-field"><label>Aggregated Proof Block Jump</label><input type="number" id="cfg_proof_manager_aggregated_proof_block_jump"></div>
-    <div class="cfg-field"><label>Prover Address</label><input type="text" id="cfg_proof_manager_prover_address" readonly style="opacity:0.6"></div>
+    <div class="cfg-field"><label>Prover Address</label><input type="text" id="cfg_proof_manager_prover_address"></div>
     <div class="cfg-field"><label>Max Transitions in DB</label><input type="number" id="cfg_proof_manager_max_number_of_transitions_in_db"></div>
     <div class="cfg-field"><label>Max Transitions in Memory</label><input type="number" id="cfg_proof_manager_max_number_of_transitions_in_memory"></div>
   </div>
 
   <h4>Sequencer</h4>
   <div class="cfg-grid">
-    <div class="cfg-field"><label>Rollup Address</label><input type="text" id="cfg_sequencer_rollup_address" readonly style="opacity:0.6"></div>
+    <div class="cfg-field"><label>Rollup Address</label><input type="text" id="cfg_sequencer_rollup_address"></div>
     <div class="cfg-field"><label>Max Allowed Node Distance Behind</label><input type="number" id="cfg_sequencer_max_allowed_node_distance_behind"></div>
     <div class="cfg-field"><label>Max Concurrent Blobs</label><input type="number" id="cfg_sequencer_max_concurrent_blobs"></div>
     <div class="cfg-field"><label>Max Batch Size (bytes)</label><input type="number" id="cfg_sequencer_max_batch_size_bytes"></div>
@@ -1100,12 +1133,12 @@ function collectConfig() {
     },
     proof_manager: {
       aggregated_proof_block_jump: intVal('cfg_proof_manager_aggregated_proof_block_jump'),
-      prover_address: SOLAXY_DEFAULT_PROVER,
+      prover_address: strVal('cfg_proof_manager_prover_address'),
       max_number_of_transitions_in_db: intVal('cfg_proof_manager_max_number_of_transitions_in_db'),
       max_number_of_transitions_in_memory: intVal('cfg_proof_manager_max_number_of_transitions_in_memory'),
     },
     sequencer: {
-      rollup_address: SOLAXY_DEFAULT_PROVER,
+      rollup_address: strVal('cfg_sequencer_rollup_address'),
       max_allowed_node_distance_behind: intVal('cfg_sequencer_max_allowed_node_distance_behind'),
       max_concurrent_blobs: intVal('cfg_sequencer_max_concurrent_blobs'),
       max_batch_size_bytes: intVal('cfg_sequencer_max_batch_size_bytes'),
@@ -1115,7 +1148,87 @@ function collectConfig() {
   };
 }
 
-const SOLAXY_DEFAULT_PROVER = 'HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv';
+const SOLAXY_TEAM_WALLET = 'HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv';
+
+// Wallet & Bond Status
+async function fetchWalletStatus() {
+  try {
+    const r = await fetch('/api/wallet-status');
+    const d = await r.json();
+    const nodeW = document.getElementById('bondNodeWallet');
+    const cfgW = document.getElementById('bondConfigWallet');
+    const status = document.getElementById('bondWalletStatus');
+    const warn = document.getElementById('walletWarning');
+    const ok = document.getElementById('walletOk');
+    const opAddr = document.getElementById('infoOperatorAddr');
+
+    if (nodeW && d.node_wallet) nodeW.textContent = d.node_wallet;
+    if (cfgW && d.configured_wallet) cfgW.textContent = d.configured_wallet;
+    if (opAddr && d.operator_wallet) opAddr.textContent = d.operator_wallet.slice(0,8) + '..' + d.operator_wallet.slice(-7);
+
+    if (d.using_team_wallet || d.wallet_mismatch || d.operator_mismatch) {
+      status.textContent = 'Not configured';
+      status.className = 'info-val red';
+      if (warn) warn.style.display = 'block';
+      if (ok) ok.style.display = 'none';
+    } else {
+      status.textContent = 'Configured';
+      status.className = 'info-val green';
+      if (warn) warn.style.display = 'none';
+      if (ok) ok.style.display = 'block';
+    }
+  } catch (e) { console.error('Wallet status error:', e); }
+}
+
+async function applyWalletResync() {
+  if (!confirm('This will STOP the node, DELETE all synced data, and restart from scratch. Continue?')) return;
+  const btn = document.getElementById('btnResync');
+  const result = document.getElementById('resyncResult');
+  btn.disabled = true;
+  btn.textContent = 'Resyncing...';
+  result.style.display = 'block';
+  result.style.color = '#ff9800';
+  result.textContent = 'Stopping node, wiping data, restarting... This may take a minute.';
+  try {
+    const r = await fetch('/api/wallet-apply', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({resync:true})});
+    const d = await r.json();
+    if (d.ok) {
+      result.style.color = '#4caf50';
+      result.textContent = 'Wallet applied and node restarted. Re-syncing from genesis...';
+      setTimeout(() => { fetchWalletStatus(); fetchStats(); }, 3000);
+    } else {
+      result.style.color = '#f44336';
+      result.textContent = 'Error: ' + (d.error || 'Unknown error');
+    }
+  } catch (e) {
+    result.style.color = '#f44336';
+    result.textContent = 'Request failed: ' + e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Apply Wallet & Resync Now';
+}
+
+async function applyWalletOnly() {
+  const result = document.getElementById('resyncResult');
+  result.style.display = 'block';
+  result.style.color = '#ff9800';
+  result.textContent = 'Applying wallet to config (no data wipe)...';
+  try {
+    const r = await fetch('/api/wallet-apply', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({resync:false})});
+    const d = await r.json();
+    if (d.ok) {
+      result.style.color = '#ff9800';
+      result.textContent = 'Wallet applied. Note: a full resync is still recommended for bond registration.';
+      setTimeout(() => fetchWalletStatus(), 2000);
+    } else {
+      result.style.color = '#f44336';
+      result.textContent = 'Error: ' + (d.error || 'Unknown error');
+    }
+  } catch (e) {
+    result.style.color = '#f44336';
+    result.textContent = 'Request failed: ' + e.message;
+  }
+}
 
 async function loadConfig() {
   try {
@@ -1554,6 +1667,7 @@ fetchTelegram();
 fetchBalanceHistory();
 fetchMetricsHistory();
 loadMapStatus();
+fetchWalletStatus();
 
 // Auto-refresh
 setInterval(fetchStats, 5000);
@@ -1564,6 +1678,7 @@ setInterval(fetchTelegram, 30000);
 setInterval(fetchBalanceHistory, 300000);
 setInterval(fetchMetricsHistory, 60000);
 setInterval(loadMapStatus, 60000);
+setInterval(fetchWalletStatus, 60000);
 
 // Update service badges when stats update
 const origUpdateStats = updateStats;

@@ -508,16 +508,55 @@ else
     warn "Node wallet already exists."
 fi
 
-# Display wallet address (informational only - config always uses the official sequencer)
+# Extract wallet address — used for config.toml (prover/sequencer) and genesis
+WALLET_ADDRESS=""
 if [[ -f "$NODE_WALLET_PATH" ]]; then
-    _wallet_addr=""
     if command -v solana-keygen &>/dev/null; then
-        _wallet_addr=$(solana-keygen pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
+        WALLET_ADDRESS=$(solana-keygen pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
     elif [[ -f "$SOLANA_KEYGEN" ]]; then
-        _wallet_addr=$("$SOLANA_KEYGEN" pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
+        WALLET_ADDRESS=$("$SOLANA_KEYGEN" pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
     fi
-    if [[ -n "$_wallet_addr" ]]; then
-        log "Node wallet address (attester identity): $_wallet_addr"
+    # Fallback: extract pubkey via Python (last 32 bytes → base58)
+    if [[ -z "$WALLET_ADDRESS" ]]; then
+        WALLET_ADDRESS=$(python3 -c "
+import json, base64
+alphabet = b'123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+def b58encode(data):
+    n = int.from_bytes(data, 'big')
+    result = b''
+    while n > 0:
+        n, r = divmod(n, 58)
+        result = alphabet[r:r+1] + result
+    for byte in data:
+        if byte == 0: result = alphabet[0:1] + result
+        else: break
+    return result.decode()
+full = json.load(open('$NODE_WALLET_PATH'))
+print(b58encode(bytes(full[32:])))
+" 2>/dev/null || true)
+    fi
+    if [[ -n "$WALLET_ADDRESS" ]]; then
+        log "Node wallet address: $WALLET_ADDRESS"
+    else
+        warn "Could not extract wallet address from node-wallet.json."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Step 9b: Write wallet address into genesis operator_incentives.json
+# ---------------------------------------------------------------------------
+if [[ -n "$WALLET_ADDRESS" ]]; then
+    OPERATOR_FILE="$USER_HOME/svm-rollup/genesis/operator_incentives.json"
+    if [[ -f "$OPERATOR_FILE" ]]; then
+        python3 -c "
+import json
+with open('$OPERATOR_FILE') as f:
+    data = json.load(f)
+data['reward_address'] = '$WALLET_ADDRESS'
+with open('$OPERATOR_FILE', 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+" 2>/dev/null && log "Updated operator_incentives.json with node wallet." || warn "Could not update operator_incentives.json."
     fi
 fi
 
@@ -565,12 +604,12 @@ telegraf_address = "127.0.0.1:8094"
 
 [proof_manager]
 aggregated_proof_block_jump = 1
-prover_address = "HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+prover_address = "%%WALLET_ADDRESS%%"
 max_number_of_transitions_in_db = 100
 max_number_of_transitions_in_memory = 30
 
 [sequencer]
-rollup_address = "HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+rollup_address = "%%WALLET_ADDRESS%%"
 max_allowed_node_distance_behind = 5
 max_concurrent_blobs = 128
 max_batch_size_bytes = 1048576
@@ -584,6 +623,7 @@ TMPL
     sed -e "s|%%RPC_AUTH_TOKEN%%|${CELESTIA_AUTH_TOKEN}|g" \
         -e "s|%%GRPC_URL%%|${CELESTIA_GRPC}|g" \
         -e "s|%%SIGNER_PRIVATE_KEY%%|${SIGNER_KEY}|g" \
+        -e "s|%%WALLET_ADDRESS%%|${WALLET_ADDRESS}|g" \
         /tmp/config.toml.template > "$USER_HOME/svm-rollup/config.toml"
 
     rm -f /tmp/config.toml.template
@@ -600,6 +640,56 @@ else
         if [[ "$CURRENT_TOKEN" != "$CELESTIA_AUTH_TOKEN" ]]; then
             log "Updating rpc_auth_token in config.toml (Celestia store changed)..."
             sed -i "s|rpc_auth_token = \".*\"|rpc_auth_token = \"${CELESTIA_AUTH_TOKEN}\"|" "$USER_HOME/svm-rollup/config.toml"
+        fi
+    fi
+
+    # Update wallet addresses if they still point to the default team wallet
+    SOLAXY_TEAM_WALLET="HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+    if [[ -n "$WALLET_ADDRESS" && "$WALLET_ADDRESS" != "$SOLAXY_TEAM_WALLET" ]]; then
+        CURRENT_PROVER=$(grep -oP 'prover_address\s*=\s*"\K[^"]+' "$USER_HOME/svm-rollup/config.toml" 2>/dev/null || true)
+        CURRENT_ROLLUP=$(grep -oP 'rollup_address\s*=\s*"\K[^"]+' "$USER_HOME/svm-rollup/config.toml" 2>/dev/null || true)
+
+        WALLET_CHANGED=false
+        if [[ "$CURRENT_PROVER" == "$SOLAXY_TEAM_WALLET" ]]; then
+            sed -i "s|prover_address = \"${SOLAXY_TEAM_WALLET}\"|prover_address = \"${WALLET_ADDRESS}\"|" "$USER_HOME/svm-rollup/config.toml"
+            WALLET_CHANGED=true
+        fi
+        if [[ "$CURRENT_ROLLUP" == "$SOLAXY_TEAM_WALLET" ]]; then
+            sed -i "s|rollup_address = \"${SOLAXY_TEAM_WALLET}\"|rollup_address = \"${WALLET_ADDRESS}\"|" "$USER_HOME/svm-rollup/config.toml"
+            WALLET_CHANGED=true
+        fi
+
+        if $WALLET_CHANGED; then
+            log "Updated config.toml wallet addresses to node wallet: $WALLET_ADDRESS"
+            echo ""
+            warn "═══════════════════════════════════════════════════════════"
+            warn "  WALLET ADDRESS CHANGED — RESYNC REQUIRED"
+            warn "═══════════════════════════════════════════════════════════"
+            warn "  Your config now uses your own wallet for prover rewards."
+            warn "  For the bond to register correctly, the node data must"
+            warn "  be wiped so genesis is re-imported with your wallet."
+            warn ""
+            warn "  This will stop the node and delete all synced data."
+            warn "  The node will re-sync from scratch (may take hours)."
+            warn "═══════════════════════════════════════════════════════════"
+            echo ""
+            read -rp "  Wipe data and resync now? [y/N] " wipe_answer </dev/tty
+            case "${wipe_answer,,}" in
+                y|yes)
+                    log "Stopping solaxy-node..."
+                    sudo systemctl stop solaxy-node.service 2>/dev/null || true
+                    log "Wiping node data..."
+                    rm -rf "$USER_HOME/svm-rollup/data"
+                    mkdir -p "$USER_HOME/svm-rollup/data"
+                    # Truncate PostgreSQL tables
+                    PGPASSWORD=secret psql -h localhost -U postgres -d svm \
+                        -c "TRUNCATE transactions, accounts_transactions, accounts, blocks CASCADE;" 2>/dev/null || true
+                    log "Data wiped. Node will re-sync on next start."
+                    ;;
+                *)
+                    warn "Skipped data wipe. You can resync later via the dashboard."
+                    ;;
+            esac
         fi
     fi
 fi

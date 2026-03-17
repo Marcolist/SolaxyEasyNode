@@ -1752,6 +1752,144 @@ def api_config_post():
 
 
 # ---------------------------------------------------------------------------
+# Wallet Configuration & Resync API
+# ---------------------------------------------------------------------------
+
+GENESIS_DIR = os.path.expanduser("~/svm-rollup/genesis")
+DATA_DIR = os.path.expanduser("~/svm-rollup/data")
+SOLAXY_TEAM_WALLET = "HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+
+
+def _get_node_wallet_address():
+    """Read the node wallet public key from node-wallet.json."""
+    try:
+        import base58
+        with open(SOLX_WALLET_PATH) as f:
+            full = json.load(f)
+            pub_bytes = bytes(full[32:])
+            return base58.b58encode(pub_bytes).decode()
+    except Exception:
+        return None
+
+
+def _get_configured_wallet():
+    """Read the currently configured wallet from config.toml."""
+    cfg = parse_config()
+    return cfg.get("proof_manager", {}).get("prover_address", "")
+
+
+@app.route("/api/wallet-status")
+def api_wallet_status():
+    """Return wallet configuration status and bond readiness."""
+    node_wallet = _get_node_wallet_address()
+    configured_wallet = _get_configured_wallet()
+
+    # Check if operator_incentives.json points to node wallet
+    operator_wallet = ""
+    op_file = os.path.join(GENESIS_DIR, "operator_incentives.json")
+    try:
+        with open(op_file) as f:
+            operator_wallet = json.load(f).get("reward_address", "")
+    except Exception:
+        pass
+
+    # Check if data dir has state (genesis already imported)
+    has_state = os.path.isdir(DATA_DIR) and any(
+        os.path.isdir(os.path.join(DATA_DIR, d))
+        for d in ["state-db", "ledger", "user_nomt_db"]
+    )
+
+    using_team_wallet = configured_wallet == SOLAXY_TEAM_WALLET
+    wallet_mismatch = node_wallet and configured_wallet != node_wallet
+    operator_mismatch = node_wallet and operator_wallet != node_wallet
+    needs_resync = wallet_mismatch or operator_mismatch
+
+    return jsonify({
+        "node_wallet": node_wallet or "",
+        "configured_wallet": configured_wallet,
+        "operator_wallet": operator_wallet,
+        "using_team_wallet": using_team_wallet,
+        "wallet_mismatch": wallet_mismatch,
+        "operator_mismatch": operator_mismatch,
+        "has_state": has_state,
+        "needs_resync": needs_resync and has_state,
+    })
+
+
+@app.route("/api/wallet-apply", methods=["POST"])
+def api_wallet_apply():
+    """Apply node wallet to config.toml + operator_incentives.json, optionally resync."""
+    node_wallet = _get_node_wallet_address()
+    if not node_wallet:
+        return jsonify({"error": "Could not read node wallet"}), 500
+
+    data = request.get_json() or {}
+    resync = data.get("resync", False)
+
+    # Update config.toml
+    try:
+        cfg = parse_config()
+        if "proof_manager" in cfg:
+            cfg["proof_manager"]["prover_address"] = node_wallet
+        if "sequencer" in cfg:
+            cfg["sequencer"]["rollup_address"] = node_wallet
+        write_config(cfg)
+    except Exception as e:
+        return jsonify({"error": f"config.toml update failed: {e}"}), 500
+
+    # Update operator_incentives.json
+    op_file = os.path.join(GENESIS_DIR, "operator_incentives.json")
+    try:
+        with open(op_file) as f:
+            op_data = json.load(f)
+        op_data["reward_address"] = node_wallet
+        with open(op_file, "w") as f:
+            json.dump(op_data, f, indent=2)
+            f.write("\n")
+    except Exception as e:
+        return jsonify({"error": f"operator_incentives.json update failed: {e}"}), 500
+
+    result = {"ok": True, "wallet": node_wallet, "resynced": False}
+
+    if resync:
+        # Stop node, wipe data, truncate DB
+        run_cmd("sudo systemctl stop solaxy-node.service", timeout=30)
+        try:
+            import shutil as _shutil
+            if os.path.isdir(DATA_DIR):
+                _shutil.rmtree(DATA_DIR)
+            os.makedirs(DATA_DIR, exist_ok=True)
+        except Exception as e:
+            return jsonify({"error": f"Data wipe failed: {e}"}), 500
+
+        # Truncate PostgreSQL
+        try:
+            conn = psycopg2.connect(
+                host="localhost", database="svm",
+                user="postgres", password="secret"
+            )
+            conn.autocommit = True
+            cur = conn.cursor()
+            cur.execute(
+                "TRUNCATE transactions, accounts_transactions, accounts, blocks CASCADE"
+            )
+            cur.close()
+            conn.close()
+        except Exception:
+            pass
+
+        # Start node again
+        run_cmd("sudo systemctl start solaxy-node.service", timeout=30)
+        result["resynced"] = True
+
+    else:
+        # Just restart node to pick up config changes
+        run_cmd("sudo systemctl restart solaxy-node.service", timeout=15)
+
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
 # Service Control API
 # ---------------------------------------------------------------------------
 
