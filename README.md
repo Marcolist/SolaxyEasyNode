@@ -91,7 +91,7 @@ To participate as a sequencer or prover, the wallet must be funded **on the Sola
 |---|---|---|
 | **Sequencer** | 10,000 SOLX | Registration bond for standard sequencer |
 | **Prover (ZK)** | 200,000 SOLX | Bond for generating ZK proofs |
-| **Total** | **220,000 SOLX** | Minimum to register as both |
+| **Total** | **210,000 SOLX** | Minimum to register as both |
 
 The bond is posted automatically when the node syncs genesis with the correct wallet configured.
 
