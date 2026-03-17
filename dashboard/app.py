@@ -189,18 +189,28 @@ def _get_node_stats_for_map():
         configured_wallet = cfg.get("proof_manager", {}).get("prover_address", "")
 
         if configured_wallet and configured_wallet != SOLAXY_TEAM_WALLET:
-            # Node has its own wallet configured — check SOLX balance as bond indicator
-            balance_result = _rpc_call(PUBLIC_RPC, "getBalance", [configured_wallet])
-            if balance_result and isinstance(balance_result, dict):
-                lamports = balance_result.get("value", 0)
-                solx = lamports / 1e6
-                if solx >= 200_000:
+            # Check actual on-chain registration via REST API
+            try:
+                cel_addr = _get_celestia_address()
+                if cel_addr:
+                    r = requests.get(
+                        f"http://127.0.0.1:8899/modules/sequencer-registry/state/known-sequencers/items/{cel_addr}",
+                        timeout=3,
+                    )
+                    if r.status_code == 200:
+                        roles.append("sequencer")
+            except Exception:
+                pass
+            try:
+                r = requests.get(
+                    f"http://127.0.0.1:8899/modules/prover-incentives/state/bonded-provers/items/{configured_wallet}",
+                    timeout=3,
+                )
+                if r.status_code == 200:
                     roles.append("prover")
-                if solx >= 10_000:
-                    roles.append("sequencer")
-                bond_status = "bonded" if roles else "unbonded"
-            else:
-                bond_status = "unknown"
+            except Exception:
+                pass
+            bond_status = "bonded" if roles else "unbonded"
         elif configured_wallet == SOLAXY_TEAM_WALLET:
             bond_status = "not_configured"
     except Exception:
@@ -1916,6 +1926,287 @@ def api_wallet_apply():
         run_cmd("sudo systemctl restart solaxy-node.service", timeout=15)
 
     return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# Sequencer & Prover Registration API
+# ---------------------------------------------------------------------------
+
+ROLLUP_REST = "http://127.0.0.1:8899"
+ROLLUP_RPC = "http://127.0.0.1:8899/rpc"
+
+
+def _get_celestia_address():
+    """Get the node's Celestia DA address."""
+    raw = run_cmd(f"celestia state account-address --node.store {CELESTIA_STORE}")
+    try:
+        return json.loads(raw).get("result", "")
+    except Exception:
+        return ""
+
+
+def _get_credential_id(address):
+    """Compute the sovereign SDK credential ID (SHA256 of pubkey bytes)."""
+    try:
+        import base58
+        pubkey_bytes = base58.b58decode(address)
+        return hashlib.sha256(pubkey_bytes).hexdigest()
+    except Exception:
+        return ""
+
+
+@app.route("/api/registration-status")
+def api_registration_status():
+    """Check sequencer and prover on-chain registration status."""
+    wallet = _get_node_wallet_address()
+    cel_addr = _get_celestia_address()
+
+    result = {
+        "wallet": wallet or "",
+        "celestia_address": cel_addr,
+        "sequencer_registered": False,
+        "sequencer_bond": "0",
+        "prover_registered": False,
+        "prover_bond": "0",
+        "gas_balance": "0",
+        "minimum_seq_bond": "0",
+        "minimum_prover_bond": "0",
+        "has_sovereign_account": False,
+    }
+
+    # Check sovereign bank balance (gas token)
+    if wallet:
+        try:
+            r = requests.get(
+                f"{ROLLUP_REST}/modules/bank/tokens/gas_token/balances/{wallet}",
+                timeout=5,
+            )
+            if r.status_code == 200:
+                result["gas_balance"] = r.json().get("amount", "0")
+        except Exception:
+            pass
+
+    # Check sovereign account exists
+    if wallet:
+        cred = _get_credential_id(wallet)
+        if cred:
+            try:
+                r = requests.get(
+                    f"{ROLLUP_REST}/modules/accounts/state/accounts/items/{cred}",
+                    timeout=5,
+                )
+                result["has_sovereign_account"] = r.status_code == 200
+            except Exception:
+                pass
+
+    # Check sequencer registration via known-sequencers (keyed by Celestia address)
+    if cel_addr:
+        try:
+            r = requests.get(
+                f"{ROLLUP_REST}/modules/sequencer-registry/state/known-sequencers/items/{cel_addr}",
+                timeout=5,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                result["sequencer_registered"] = True
+                result["sequencer_bond"] = data.get("value", {}).get("balance", "0")
+        except Exception:
+            pass
+
+    # Check prover registration (keyed by rollup address)
+    if wallet:
+        try:
+            r = requests.get(
+                f"{ROLLUP_REST}/modules/prover-incentives/state/bonded-provers/items/{wallet}",
+                timeout=5,
+            )
+            if r.status_code == 200:
+                result["prover_registered"] = True
+                result["prover_bond"] = r.json().get("value", "0")
+        except Exception:
+            pass
+
+    # Get minimum bonds
+    try:
+        r = requests.get(
+            f"{ROLLUP_REST}/modules/sequencer-registry/state/minimum-bond",
+            timeout=3,
+        )
+        if r.status_code == 200:
+            result["minimum_seq_bond"] = r.json().get("value", "0")
+    except Exception:
+        pass
+    try:
+        r = requests.get(
+            f"{ROLLUP_REST}/modules/prover-incentives/state/minimum-bond",
+            timeout=3,
+        )
+        if r.status_code == 200:
+            result["minimum_prover_bond"] = str(r.json().get("value", "0"))
+    except Exception:
+        pass
+
+    return jsonify(result)
+
+
+@app.route("/api/simulate-register", methods=["POST"])
+def api_simulate_register():
+    """Simulate a sequencer or prover registration call."""
+    data = request.get_json() or {}
+    role = data.get("role", "sequencer")  # "sequencer" or "prover"
+    amount = data.get("amount")
+
+    wallet = _get_node_wallet_address()
+    if not wallet:
+        return jsonify({"error": "Node wallet not found"}), 400
+
+    cred = _get_credential_id(wallet)
+    if not cred:
+        return jsonify({"error": "Could not compute credential ID"}), 400
+
+    if role == "sequencer":
+        cel_addr = _get_celestia_address()
+        if not cel_addr:
+            return jsonify({"error": "Celestia DA address not found"}), 400
+        if not amount:
+            amount = "10000"
+        call_body = {
+            "sequencer_registry": {
+                "register": {
+                    "amount": str(amount),
+                    "da_address": cel_addr,
+                }
+            }
+        }
+    elif role == "prover":
+        if not amount:
+            amount = "200000"
+        call_body = {
+            "prover_incentives": {
+                "register": str(amount),
+            }
+        }
+    else:
+        return jsonify({"error": f"Unknown role: {role}"}), 400
+
+    payload = {
+        "sender": cred,
+        "call": call_body,
+    }
+
+    try:
+        r = requests.post(
+            f"{ROLLUP_REST}/rollup/simulate",
+            json=payload,
+            timeout=15,
+        )
+        if r.status_code == 200:
+            result = r.json()
+            return jsonify({"ok": True, "result": result})
+        else:
+            return jsonify({
+                "ok": False,
+                "error": r.text[:500],
+                "status_code": r.status_code,
+            })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/submit-register", methods=["POST"])
+def api_submit_register():
+    """Submit an actual sequencer or prover registration transaction.
+
+    This builds a Solana-compatible transaction with the sovereign module call
+    and submits it via sendTransaction.  The transaction must then be batched
+    by the active sequencer to take effect.
+    """
+    data = request.get_json() or {}
+    role = data.get("role", "sequencer")
+    amount = data.get("amount")
+
+    wallet = _get_node_wallet_address()
+    if not wallet:
+        return jsonify({"error": "Node wallet not found"}), 400
+
+    cel_addr = _get_celestia_address()
+
+    # First, simulate to verify the call would succeed
+    cred = _get_credential_id(wallet)
+    if not cred:
+        return jsonify({"error": "Could not compute credential ID"}), 400
+
+    if role == "sequencer":
+        if not cel_addr:
+            return jsonify({"error": "Celestia DA address not found"}), 400
+        if not amount:
+            amount = "10000"
+        call_body = {
+            "sequencer_registry": {
+                "register": {
+                    "amount": str(amount),
+                    "da_address": cel_addr,
+                }
+            }
+        }
+    elif role == "prover":
+        if not amount:
+            amount = "200000"
+        call_body = {
+            "prover_incentives": {
+                "register": str(amount),
+            }
+        }
+    else:
+        return jsonify({"error": f"Unknown role: {role}"}), 400
+
+    # Simulate first
+    try:
+        sim_resp = requests.post(
+            f"{ROLLUP_REST}/rollup/simulate",
+            json={"sender": cred, "call": call_body},
+            timeout=15,
+        )
+        if sim_resp.status_code == 200:
+            sim_result = sim_resp.json()
+            if sim_result.get("outcome") == "reverted":
+                detail = sim_result.get("detail", {}).get("message", "Unknown error")
+                return jsonify({
+                    "ok": False,
+                    "error": f"Simulation failed: {detail}",
+                    "phase": "simulate",
+                })
+        elif sim_resp.status_code != 0:
+            return jsonify({
+                "ok": False,
+                "error": f"Simulation error: {sim_resp.text[:300]}",
+                "phase": "simulate",
+            })
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": f"Simulation request failed: {e}",
+            "phase": "simulate",
+        })
+
+    # NOTE: Actual transaction submission requires building a sovereign-sdk
+    # FullyBakedTx and submitting via /sequencer/txs or sendTransaction.
+    # The transaction encoding is binary (Borsh-serialized RuntimeCall wrapped
+    # in a Solana VersionedTransaction).
+    #
+    # For now, we return the simulate success and instruct the user that
+    # registration requires the active sequencer to batch the transaction.
+    return jsonify({
+        "ok": True,
+        "phase": "simulated",
+        "message": (
+            f"Simulation succeeded for {role} registration. "
+            "On-chain submission requires the active sequencer to batch the "
+            "transaction. This feature will be available once the Solaxy team "
+            "publishes a transaction SDK."
+        ),
+        "simulate_result": sim_result if sim_resp.status_code == 200 else None,
+    })
 
 
 # ---------------------------------------------------------------------------

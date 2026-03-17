@@ -474,6 +474,24 @@ canvas.sparkline{vertical-align:middle}
     </div>
   </div>
 
+  <h4 style="margin-top:16px">On-Chain Registration</h4>
+  <div id="regStatusBox">
+    <div class="info-grid">
+      <div class="info-row"><span class="info-key">SOLX Balance</span><span class="info-val mono" id="regBalance">-</span></div>
+      <div class="info-row"><span class="info-key">Celestia Address</span><span class="info-val mono" style="font-size:10px" id="regCelAddr">-</span></div>
+      <div class="info-row"><span class="info-key">Sovereign Account</span><span class="info-val" id="regSovAccount">-</span></div>
+      <div class="info-row"><span class="info-key">Sequencer</span><span class="info-val" id="regSeqStatus">-</span></div>
+      <div class="info-row"><span class="info-key">Prover</span><span class="info-val" id="regProverStatus">-</span></div>
+    </div>
+  </div>
+  <div id="regActions" style="display:none; margin:10px 0">
+    <div style="display:flex; gap:8px; flex-wrap:wrap">
+      <button class="btn btn-sm btn-primary" onclick="simulateRegister('sequencer')" id="btnSimSeq">Simulate Sequencer Registration</button>
+      <button class="btn btn-sm btn-primary" onclick="simulateRegister('prover')" id="btnSimProver">Simulate Prover Registration</button>
+    </div>
+    <div id="regResult" style="margin-top:8px; display:none; padding:8px; border-radius:4px; font-size:13px"></div>
+  </div>
+
   <h4 style="margin-top:16px">Attestation Status</h4>
   <div class="info-grid">
     <div class="info-row"><span class="info-key">Role</span><span class="info-val">Standard Sequencer (Full Node)</span></div>
@@ -1230,6 +1248,97 @@ async function applyWalletOnly() {
   }
 }
 
+// On-Chain Registration Status
+async function fetchRegistrationStatus() {
+  try {
+    const r = await fetch('/api/registration-status');
+    const d = await r.json();
+
+    const bal = document.getElementById('regBalance');
+    const cel = document.getElementById('regCelAddr');
+    const sov = document.getElementById('regSovAccount');
+    const seq = document.getElementById('regSeqStatus');
+    const prv = document.getElementById('regProverStatus');
+    const actions = document.getElementById('regActions');
+
+    if (bal) {
+      const amount = parseInt(d.gas_balance || '0', 10);
+      bal.textContent = amount.toLocaleString() + ' (raw units)';
+    }
+    if (cel) cel.textContent = d.celestia_address || 'Not found';
+    if (sov) {
+      sov.textContent = d.has_sovereign_account ? 'Active' : 'Not created';
+      sov.className = 'info-val ' + (d.has_sovereign_account ? 'green' : 'yellow');
+    }
+    if (seq) {
+      if (d.sequencer_registered) {
+        seq.innerHTML = '<span class="green">Registered</span> (bond: ' + d.sequencer_bond + ')';
+      } else {
+        seq.innerHTML = '<span class="red">Not registered</span> (min bond: ' + d.minimum_seq_bond + ')';
+      }
+    }
+    if (prv) {
+      if (d.prover_registered) {
+        prv.innerHTML = '<span class="green">Registered</span> (bond: ' + d.prover_bond + ')';
+      } else {
+        prv.innerHTML = '<span class="red">Not registered</span> (min bond: ' + d.minimum_prover_bond + ')';
+      }
+    }
+    // Show action buttons if not both registered
+    if (actions && (!d.sequencer_registered || !d.prover_registered)) {
+      actions.style.display = 'block';
+      document.getElementById('btnSimSeq').style.display = d.sequencer_registered ? 'none' : '';
+      document.getElementById('btnSimProver').style.display = d.prover_registered ? 'none' : '';
+    } else if (actions) {
+      actions.style.display = 'none';
+    }
+  } catch (e) { console.error('Registration status error:', e); }
+}
+
+async function simulateRegister(role) {
+  const btn = document.getElementById(role === 'sequencer' ? 'btnSimSeq' : 'btnSimProver');
+  const result = document.getElementById('regResult');
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Simulating...';
+  result.style.display = 'block';
+  result.style.background = '#2a2a2a';
+  result.style.color = '#ff9800';
+  result.textContent = 'Running simulation...';
+
+  try {
+    const r = await fetch('/api/simulate-register', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({role: role}),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      const outcome = d.result?.outcome || 'unknown';
+      if (outcome === 'reverted') {
+        const detail = d.result?.detail?.message || 'Unknown error';
+        result.style.background = '#3a1010';
+        result.style.color = '#f44336';
+        result.textContent = 'Simulation reverted: ' + detail;
+      } else {
+        result.style.background = '#0a2e0a';
+        result.style.color = '#4caf50';
+        result.textContent = 'Simulation succeeded! Registration would be accepted. Submission requires the active sequencer to batch the transaction.';
+      }
+    } else {
+      result.style.background = '#3a1010';
+      result.style.color = '#f44336';
+      result.textContent = 'Error: ' + (d.error || 'Unknown error');
+    }
+  } catch (e) {
+    result.style.background = '#3a1010';
+    result.style.color = '#f44336';
+    result.textContent = 'Request failed: ' + e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = oldText;
+}
+
 async function loadConfig() {
   try {
     const r = await fetch('/api/config');
@@ -1668,6 +1777,7 @@ fetchBalanceHistory();
 fetchMetricsHistory();
 loadMapStatus();
 fetchWalletStatus();
+fetchRegistrationStatus();
 
 // Auto-refresh
 setInterval(fetchStats, 5000);
@@ -1679,6 +1789,7 @@ setInterval(fetchBalanceHistory, 300000);
 setInterval(fetchMetricsHistory, 60000);
 setInterval(loadMapStatus, 60000);
 setInterval(fetchWalletStatus, 60000);
+setInterval(fetchRegistrationStatus, 30000);
 
 // Update service badges when stats update
 const origUpdateStats = updateStats;

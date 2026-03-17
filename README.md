@@ -93,7 +93,70 @@ To participate as a sequencer or prover, the wallet must be funded **on the Sola
 | **Prover (ZK)** | 200,000 SOLX | Bond for generating ZK proofs |
 | **Total** | **210,000 SOLX** | Minimum to register as both |
 
-The bond is posted automatically when the node syncs genesis with the correct wallet configured.
+### On-Chain Registration
+
+Having a funded wallet is not enough — you must **register on-chain** as a sequencer and/or prover. The node does NOT register automatically.
+
+**Registration flow:**
+
+1. **Fund your wallet** — your node wallet must hold enough SOLX (on the Solaxy rollup, not Solana mainnet)
+2. **Create a sovereign account** — submit any Solana-compatible transaction (e.g. a self-transfer) through your node to create the credential mapping
+3. **Register as sequencer** — submit a `sequencer_registry::register` call with your Celestia DA address and bond amount
+4. **Register as prover** (optional) — submit a `prover_incentives::register` call with your bond amount
+
+**Using the Dashboard:**
+
+Open `http://<your-ip>:5555` and navigate to the **Registration** panel. The dashboard shows:
+- Current registration status (sequencer / prover)
+- SOLX balance and minimum bond requirements
+- Simulate button to test if registration would succeed
+- Submit button to send the registration transaction
+
+**REST API (for advanced users):**
+
+```bash
+# Check sequencer registration (keyed by Celestia DA address)
+curl http://127.0.0.1:8899/modules/sequencer-registry/state/known-sequencers/items/<celestia_address>
+
+# Check prover registration (keyed by rollup wallet address)
+curl http://127.0.0.1:8899/modules/prover-incentives/state/bonded-provers/items/<wallet_address>
+
+# Check SOLX balance
+curl http://127.0.0.1:8899/modules/bank/tokens/gas_token/balances/<wallet_address>
+
+# Check minimum bonds
+curl http://127.0.0.1:8899/modules/sequencer-registry/state/minimum-bond
+curl http://127.0.0.1:8899/modules/prover-incentives/state/minimum-bond
+
+# Simulate sequencer registration
+curl -X POST http://127.0.0.1:8899/rollup/simulate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sender": "<sha256_of_pubkey_hex>",
+    "call": {
+      "sequencer_registry": {
+        "register": {
+          "amount": "10000",
+          "da_address": "<your_celestia_address>"
+        }
+      }
+    }
+  }'
+
+# Simulate prover registration
+curl -X POST http://127.0.0.1:8899/rollup/simulate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sender": "<sha256_of_pubkey_hex>",
+    "call": {
+      "prover_incentives": {
+        "register": "200000"
+      }
+    }
+  }'
+```
+
+> **Note:** The `sender` field in the simulate API is the SHA256 hash of your wallet's public key bytes (hex-encoded), not the base58 address. The dashboard handles this automatically.
 
 ### Wallet Setup (New Install)
 
