@@ -188,7 +188,6 @@ canvas.sparkline{vertical-align:middle}
     </div>
     <div class="stat-grid">
       <div class="stat"><span class="stat-label">Slot</span><span class="stat-value" id="solSlot">-</span></div>
-      <div class="stat"><span class="stat-label">Slot Diff</span><span class="stat-value" id="solSlotDiff">-</span></div>
       <div class="stat"><span class="stat-label">Block Time</span><span class="stat-value" id="solBlockTime">-</span></div>
       <div class="stat">
         <span class="stat-label">DA Blocks/sec</span>
@@ -700,15 +699,6 @@ function updateStats(data) {
     setBadge('solaxyBadge', sol.service.active);
   }
   document.getElementById('solSlot').textContent = num(sol.sync.slot_number);
-  // Slot Diff in SVM Rollup box (local slot vs network)
-  const rpcNet = (data.rpc && data.rpc.network) || {};
-  const rpcLoc = (data.rpc && data.rpc.local) || {};
-  const solDiffEl = document.getElementById('solSlotDiff');
-  if (rpcLoc.slot != null && rpcNet.slot != null) {
-    const sd = rpcNet.slot - rpcLoc.slot;
-    solDiffEl.textContent = sd <= 0 ? '0' : '-' + num(sd);
-    solDiffEl.style.color = sd <= 3 ? '#3fb950' : sd <= 20 ? '#d29922' : '#f85149';
-  }
   if (sol.sync.block_time_ms != null) {
     document.getElementById('solBlockTime').textContent = sol.sync.block_time_ms + ' ms';
   } else if (sol.sync.slots_per_sec === 0) {
