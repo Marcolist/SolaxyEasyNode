@@ -29,23 +29,6 @@ app = Flask(__name__)
 
 EASYNODE_VERSION = "1.0.0"
 
-
-def _read_db_password():
-    """Read PostgreSQL password from dashboard.conf, fallback to 'secret' for old installs."""
-    conf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.conf")
-    if os.path.isfile(conf):
-        try:
-            with open(conf) as f:
-                for line in f:
-                    if line.startswith("DB_PASSWORD="):
-                        return line.split("=", 1)[1].strip()
-        except Exception:
-            pass
-    return "secret"
-
-
-DB_PASSWORD = _read_db_password()
-
 # Cache for expensive CLI calls
 _cache = {}
 _cache_lock = threading.Lock()
@@ -817,15 +800,47 @@ def _telegram_build_health():
     hostname = socket.gethostname()
 
     services = [
-        ("solaxy-node", "solaxy-node"),
-        (CELESTIA_SERVICE, CELESTIA_SERVICE),
-        ("postgresql", "postgresql"),
+        ("Solaxy Node", "solaxy-node"),
+        (f"Celestia Bridge", CELESTIA_SERVICE),
+        ("PostgreSQL", "postgresql"),
     ]
-    lines = [f"📊 Health — {hostname}", ""]
+    lines = [f"📊 Health — {hostname} (v{EASYNODE_VERSION})", ""]
+
+    # Services
     for label, svc in services:
         status = run_cmd(f"systemctl is-active {svc}")
         icon = "✅" if status == "active" else "❌"
         lines.append(f"{icon} {label}: {status}")
+
+    # Sync status
+    try:
+        sync = requests.get(f"{ROLLUP_REST}/rollup/sync-status", timeout=3).json()
+        da_height = sync.get("synced", {}).get("synced_da_height", 0)
+        lines.append(f"\n📡 DA Height: {da_height:,}")
+    except Exception:
+        pass
+
+    # Bond status
+    try:
+        cel_addr = _get_celestia_address()
+        wallet = _get_node_wallet_address()
+        roles = []
+        if cel_addr:
+            r = requests.get(f"{ROLLUP_REST}/modules/sequencer-registry/state/known-sequencers/items/{cel_addr}", timeout=3)
+            if r.status_code == 200:
+                bond = int(r.json().get("value", {}).get("balance", "0")) / 1e6
+                roles.append(f"Sequencer ({bond:,.2f} SOLX)")
+        if wallet:
+            r = requests.get(f"{ROLLUP_REST}/modules/prover-incentives/state/bonded-provers/items/{wallet}", timeout=3)
+            if r.status_code == 200:
+                bond = int(r.json().get("value", "0")) / 1e6
+                roles.append(f"Prover ({bond:,.2f} SOLX)")
+        if roles:
+            lines.append(f"\n🔐 Roles: {' · '.join(roles)}")
+        else:
+            lines.append(f"\n🔐 Roles: Not bonded")
+    except Exception:
+        pass
 
     # Uptime
     try:
@@ -834,15 +849,15 @@ def _telegram_build_health():
             days, rem = divmod(secs, 86400)
             hours, rem = divmod(rem, 3600)
             mins, _ = divmod(rem, 60)
-            lines.append(f"\nUptime: {days}d {hours}h {mins}m")
+            lines.append(f"\n⏱ Uptime: {days}d {hours}h {mins}m")
     except Exception:
         pass
 
-    # CPU / Memory
+    # CPU / Memory / Disk
     try:
         with open("/proc/loadavg") as f:
             load1 = f.read().split()[0]
-            lines.append(f"CPU Load (1m): {load1}")
+            lines.append(f"CPU Load: {load1}")
     except Exception:
         pass
 
@@ -855,7 +870,6 @@ def _telegram_build_health():
             pct = round(int(parts[2]) / int(parts[1]) * 100, 1)
             lines.append(f"Memory: {used_gb}G / {total_gb}G ({pct}%)")
 
-    # Disk
     import shutil as _shutil
     disk = _shutil.disk_usage("/")
     disk_pct = round(disk.used / disk.total * 100, 1)
@@ -884,6 +898,61 @@ def _telegram_build_log(service="solaxy"):
     if len(raw) > max_len:
         raw = raw[-max_len:]
     return header + raw
+
+
+def _telegram_build_bond():
+    """Build bond status text for /bond command."""
+    wallet = _get_node_wallet_address()
+    cel_addr = _get_celestia_address()
+    lines = ["🔐 Bond Status", ""]
+
+    if wallet:
+        lines.append(f"Wallet: {wallet}")
+    if cel_addr:
+        lines.append(f"Celestia: {cel_addr}")
+    lines.append("")
+
+    # Sequencer
+    try:
+        if cel_addr:
+            r = requests.get(f"{ROLLUP_REST}/modules/sequencer-registry/state/known-sequencers/items/{cel_addr}", timeout=5)
+            if r.status_code == 200:
+                data = r.json().get("value", {})
+                bond = int(data.get("balance", "0")) / 1e6
+                state = data.get("balance_state", "?")
+                lines.append(f"✅ Sequencer: {bond:,.2f} SOLX ({state})")
+            else:
+                min_r = requests.get(f"{ROLLUP_REST}/modules/sequencer-registry/state/minimum-bond", timeout=3)
+                min_bond = int(min_r.json().get("value", "0")) / 1e6 if min_r.status_code == 200 else 0
+                lines.append(f"❌ Sequencer: Not bonded (min: {min_bond:,.2f} SOLX)")
+    except Exception:
+        lines.append("⚠️ Sequencer: Could not check")
+
+    # Prover
+    try:
+        if wallet:
+            r = requests.get(f"{ROLLUP_REST}/modules/prover-incentives/state/bonded-provers/items/{wallet}", timeout=5)
+            if r.status_code == 200:
+                bond = int(r.json().get("value", "0")) / 1e6
+                lines.append(f"✅ Prover: {bond:,.2f} SOLX")
+            else:
+                min_r = requests.get(f"{ROLLUP_REST}/modules/prover-incentives/state/minimum-bond", timeout=3)
+                min_bond = int(str(min_r.json().get("value", "0"))) / 1e6 if min_r.status_code == 200 else 0
+                lines.append(f"❌ Prover: Not bonded (min: {min_bond:,.2f} SOLX)")
+    except Exception:
+        lines.append("⚠️ Prover: Could not check")
+
+    # SOLX balance
+    try:
+        if wallet:
+            r = requests.get(f"{ROLLUP_REST}/modules/bank/tokens/gas_token/balances/{wallet}", timeout=5)
+            if r.status_code == 200:
+                bal = int(r.json().get("amount", "0")) / 1e6
+                lines.append(f"\n💰 SOLX Balance: {bal:,.2f}")
+    except Exception:
+        pass
+
+    return "\n".join(lines)
 
 
 def _telegram_build_balance():
@@ -1019,15 +1088,19 @@ def _telegram_command_loop():
                     except Exception as e:
                         telegram_send_to(chat_id, f"❌ Update failed: {e}")
 
+                elif base_cmd == "/bond":
+                    telegram_send_to(chat_id, _telegram_build_bond())
+
                 elif base_cmd in ("/start", "/help"):
                     welcome = (
-                        "🤖 Solaxy Node Bot\n\n"
+                        f"🤖 Solaxy EasyNode v{EASYNODE_VERSION}\n\n"
                         "Available commands:\n\n"
-                        "📊 /health — Service status & system stats\n"
-                        "📄 /log — Last 20 solaxy-node log lines\n"
-                        "📄 /log celestia — Celestia log lines\n"
-                        "📄 /log postgresql — PostgreSQL log lines\n"
+                        "📊 /health — Services, sync, roles & system stats\n"
+                        "🔐 /bond — Bond status for all roles\n"
                         "💰 /balance — TIA & SOLX balance + 24h delta\n"
+                        "📄 /log — Last 20 solaxy-node log lines\n"
+                        "📄 /log celestia — Celestia bridge log lines\n"
+                        "📄 /log postgresql — PostgreSQL log lines\n"
                         "🔄 /restart <svc> — Restart a service\n"
                         "▶️ /start <svc> — Start a service\n"
                         "⏹️ /stop <svc> — Stop a service\n"
@@ -1273,7 +1346,7 @@ def celestia_p2p():
 def db_stats():
     """Get PostgreSQL stats."""
     try:
-        conn = psycopg2.connect(dbname="svm", user="postgres", password=DB_PASSWORD, host="localhost")
+        conn = psycopg2.connect(dbname="svm", user="postgres", password="secret", host="localhost")
         cur = conn.cursor()
         stats = {}
         for table in ("blocks", "transactions", "accounts"):
@@ -1959,7 +2032,7 @@ def api_wallet_apply():
         try:
             conn = psycopg2.connect(
                 host="localhost", database="svm",
-                user="postgres", password=DB_PASSWORD
+                user="postgres", password="secret"
             )
             conn.autocommit = True
             cur = conn.cursor()
@@ -2605,9 +2678,10 @@ try:
     requests.post(
         f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setMyCommands",
         json={"commands": [
-            {"command": "health", "description": "Service status & system stats"},
-            {"command": "log", "description": "Last 20 log lines (+ celestia/postgresql)"},
+            {"command": "health", "description": "Services, sync, roles & system stats"},
+            {"command": "bond", "description": "Bond status for all roles"},
             {"command": "balance", "description": "TIA & SOLX balance + 24h delta"},
+            {"command": "log", "description": "Last 20 log lines (+ celestia/postgresql)"},
             {"command": "restart", "description": "Restart a service (e.g. /restart solaxy-node)"},
             {"command": "start", "description": "Start a service"},
             {"command": "stop", "description": "Stop a service"},
