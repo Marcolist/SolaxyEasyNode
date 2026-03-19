@@ -58,6 +58,18 @@ DASHBOARD_FILES = [
 CONFIG_PATH = os.path.expanduser("~/svm-rollup/config.toml")
 GENESIS_CHAIN_STATE = os.path.expanduser("~/svm-rollup/genesis/chain_state_zk.json")
 
+
+def _detect_pg_service():
+    """Detect the correct PostgreSQL service unit name."""
+    for name in ("postgresql.service", "postgresql@16-main.service", "postgresql@15-main.service", "postgresql@14-main.service"):
+        status = subprocess.run(["systemctl", "is-active", name], capture_output=True, text=True).stdout.strip()
+        if status == "active":
+            return name
+    return "postgresql.service"
+
+
+PG_SERVICE = _detect_pg_service()
+
 # ---------------------------------------------------------------------------
 # Public Validator Map Integration
 # ---------------------------------------------------------------------------
@@ -885,7 +897,7 @@ def _telegram_build_log(service="solaxy"):
     svc_map = {
         "solaxy": "solaxy-node.service",
         "celestia": CELESTIA_SERVICE_UNIT,
-        "postgresql": "postgresql@16-main.service",
+        "postgresql": PG_SERVICE,
     }
     svc = svc_map.get(service, svc_map["solaxy"])
     label = service if service in svc_map else "solaxy"
@@ -1562,7 +1574,7 @@ def api_stats():
     solaxy_svc = systemd_status("solaxy-node.service")
     solaxy_sync = parse_solaxy_logs()
     celestia_svc = systemd_status(CELESTIA_SERVICE_UNIT)
-    pg_svc = systemd_status("postgresql.service")
+    pg_svc = systemd_status(PG_SERVICE)
 
     return jsonify({
         "genesis_da_height": get_genesis_da_height(),
@@ -1596,7 +1608,7 @@ def api_logs(service):
     service_map = {
         "solaxy": "solaxy-node.service",
         "celestia": CELESTIA_SERVICE_UNIT,
-        "postgresql": "postgresql@16-main.service",
+        "postgresql": PG_SERVICE,
     }
     svc = service_map.get(service)
     if not svc:
@@ -2499,7 +2511,7 @@ def api_submit_register():
 ALLOWED_SERVICES = {
     "solaxy-node": "solaxy-node.service",
     CELESTIA_SERVICE: CELESTIA_SERVICE_UNIT,
-    "postgresql": "postgresql.service",
+    "postgresql": PG_SERVICE,
     "solaxy-dashboard": "solaxy-dashboard.service",
 }
 
