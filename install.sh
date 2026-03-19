@@ -481,9 +481,10 @@ if [[ -f "$DASHBOARD_CONF" ]]; then
     PG_PASS=$(grep -oP '^DB_PASSWORD=\K.*' "$DASHBOARD_CONF" 2>/dev/null || true)
 fi
 if [[ -z "$PG_PASS" ]]; then
-    # Existing installs with "secret" — keep it for backward compat
-    if sudo -u postgres psql -c "SELECT 1" -h localhost -U postgres 2>/dev/null | grep -q 1; then
+    # Existing installs: check if the svm database already exists (= previous install with "secret")
+    if sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='svm'" 2>/dev/null | grep -q 1; then
         PG_PASS="secret"
+        log "Existing install detected, keeping current DB password."
     else
         PG_PASS=$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)
         log "Generated random PostgreSQL password."
