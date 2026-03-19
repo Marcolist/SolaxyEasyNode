@@ -23,6 +23,8 @@ One-line installer for a complete Solaxy node: **SVM Rollup + Celestia Bridge No
                   \_/
 ```
 
+## Quick Install
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main/install.sh | bash
 ```
@@ -41,12 +43,6 @@ Running a Solaxy node currently requires multiple manual steps — Celestia buil
 
 ### Network Map
 ![Network Map](screenshots/map.png)
-
-## Quick Install
-
-```bash
-curl -sSL https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main/install.sh | bash
-```
 
 ## What Gets Installed
 
