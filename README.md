@@ -159,7 +159,7 @@ The dashboard sends periodic heartbeats to the [Public Validator Map](https://ma
 ## Requirements
 
 - Ubuntu 22.04 / 24.04 (or Debian-based)
-- 4+ CPU cores, 8+ GB RAM, 100+ GB SSD
+- 4+ CPU cores, 16+ GB RAM, 250+ GB SSD
 
 ## File Structure
 
