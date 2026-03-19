@@ -476,17 +476,13 @@ sudo systemctl start postgresql
 # PostgreSQL password — read from dashboard.conf or generate a new one
 # ---------------------------------------------------------------------------
 DASHBOARD_CONF="$USER_HOME/dashboard/dashboard.conf"
+PG_PASS=""
 if [[ -f "$DASHBOARD_CONF" ]]; then
     PG_PASS=$(grep -oP '^DB_PASSWORD=\K.*' "$DASHBOARD_CONF" 2>/dev/null || true)
 fi
 if [[ -z "$PG_PASS" ]]; then
-    # Existing installs with "secret" — keep it for backward compat
-    if sudo -u postgres psql -c "SELECT 1" -h localhost -U postgres 2>/dev/null | grep -q 1; then
-        PG_PASS="secret"
-    else
-        PG_PASS=$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)
-        log "Generated random PostgreSQL password."
-    fi
+    PG_PASS=$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)
+    log "Generated secure DB password."
     mkdir -p "$(dirname "$DASHBOARD_CONF")"
     echo "DB_PASSWORD=${PG_PASS}" > "$DASHBOARD_CONF"
     chmod 600 "$DASHBOARD_CONF"
@@ -498,6 +494,14 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='postgres'" | gr
 sudo -u postgres psql -c "ALTER USER postgres PASSWORD '${PG_PASS}';" 2>/dev/null || true
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='svm'" | grep -q 1 || \
     sudo -u postgres createdb svm
+
+# Update DATABASE_URL in existing service file if it still has the old password
+if [[ -f /etc/systemd/system/solaxy-node.service ]]; then
+    if grep -q 'DATABASE_URL=postgresql://postgres:secret@' /etc/systemd/system/solaxy-node.service 2>/dev/null && [[ "$PG_PASS" != "secret" ]]; then
+        sudo sed -i "s|DATABASE_URL=postgresql://postgres:secret@|DATABASE_URL=postgresql://postgres:${PG_PASS}@|" /etc/systemd/system/solaxy-node.service
+        log "Updated DATABASE_URL in solaxy-node.service with new password."
+    fi
+fi
 
 # Ensure local TCP connections use md5 auth (password) so DATABASE_URL works
 PG_HBA=$(sudo -u postgres psql -t -P format=unaligned -c 'SHOW hba_file' 2>/dev/null | tr -d ' ')
@@ -704,6 +708,12 @@ else
         log "Migrated config.toml to match new binary defaults."
     fi
 
+    # Replace any leftover %%WALLET_ADDRESS%% placeholders from failed first installs
+    if [[ -n "$WALLET_ADDRESS" ]] && grep -q '%%WALLET_ADDRESS%%' "$USER_HOME/svm-rollup/config.toml" 2>/dev/null; then
+        sed -i "s|%%WALLET_ADDRESS%%|${WALLET_ADDRESS}|g" "$USER_HOME/svm-rollup/config.toml"
+        log "Replaced wallet placeholder in config.toml with: $WALLET_ADDRESS"
+    fi
+
     # Update wallet addresses if they still point to the default team wallet
     SOLAXY_TEAM_WALLET="HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
     if [[ -n "$WALLET_ADDRESS" && "$WALLET_ADDRESS" != "$SOLAXY_TEAM_WALLET" ]]; then
@@ -871,7 +881,7 @@ EOF
     fi
 
     # Replace placeholders
-    sed -i "s|%%USER%%|${USER_NAME}|g; s|%%HOME%%|${USER_HOME}|g; s|%%CELESTIA_SERVICE%%|${CELESTIA_SERVICE_NAME}|g; s|%%CELESTIA_MODE%%|${CELESTIA_MODE}|g" "$tmp"
+    sed -i "s|%%USER%%|${USER_NAME}|g; s|%%HOME%%|${USER_HOME}|g; s|%%CELESTIA_SERVICE%%|${CELESTIA_SERVICE_NAME}|g; s|%%CELESTIA_MODE%%|${CELESTIA_MODE}|g; s|%%DB_PASSWORD%%|${PG_PASS}|g" "$tmp"
     sudo cp "$tmp" "/etc/systemd/system/${name}"
     rm -f "$tmp"
 }
