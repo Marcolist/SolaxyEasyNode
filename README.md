@@ -1,4 +1,4 @@
-# SolaxyEasyNode
+# SolaxyEasyNode v1.0.0
 
 One-line installer for a complete Solaxy node: **SVM Rollup + Celestia Bridge Node + PostgreSQL + Web Dashboard**.
 
@@ -29,29 +29,6 @@ One-line installer for a complete Solaxy node: **SVM Rollup + Celestia Bridge No
 curl -sSL https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main/install.sh | bash
 ```
 
-The installer shows progress bars for all downloads and extractions.
-
-## Why this exists
-
-Running a Solaxy node currently requires multiple manual steps:
-- Celestia build
-- Rollup config
-- Service wiring
-- Monitoring setup
-
-SolaxyEasyNode reduces setup time and provides a production-ready dashboard + Telegram alerts.
-
-## Screenshots
-
-### Node Dashboard
-![Dashboard](screenshots/dashboard.png)
-
-### Telegram Bot
-![Telegram Bot](screenshots/telegrambot.png)
-
-### Node Map
-![Network Map](screenshots/map.png)
-
 ## What Gets Installed
 
 | Component | Description |
@@ -62,20 +39,40 @@ SolaxyEasyNode reduces setup time and provides a production-ready dashboard + Te
 | **Go 1.26.1** | Required to build Celestia v0.29.1-mocha from source |
 | **Dashboard** | Web UI at `http://<LAN_IP>:5555` |
 
-### Celestia Bridge Node
+## Node Roles & Registration
 
-The installer uses a Celestia Bridge Node in pruning mode. The `SyncFromHeight` is set automatically to the genesis DA height from `chain_state_zk.json`, so no unnecessary blocks are synced.
+Each node can participate in the network as a **Sequencer** and/or **Prover**. Registration is done directly from the dashboard.
 
-| | Bridge Node |
-|---|---|
-| **Network** | Celestia Mainnet (`--p2p.network celestia`) |
-| **Disk** | ~20-50 GB (with pruning window) |
-| **RAM** | ~4-8 GB |
-| **Sync** | Hours (from genesis DA height) |
-| **Pruning** | Dynamic — covers genesis-to-head + 48h buffer (min 720h) |
-| **RPC Auth** | Skipped (`--rpc.skip-auth`) for stable rollup connection |
+| Role | Min. Bond | Description |
+|---|---|---|
+| **Sequencer** | 10,000 SOLX | Produces DA batches and orders transactions |
+| **Prover (ZK)** | 1,000 SOLX | Generates ZK proofs for state transitions |
 
-## Wallet, Rewards & Bond
+> Bonds are in SOLX on the Solaxy L2 rollup (not Solana mainnet). Bridge SOLX via the Solaxy bridge at [bridge.solaxy.io](https://bridge.solaxy.io).
+
+### Register from the Dashboard
+
+1. Open `http://<your-ip>:5555`
+2. Navigate to **Node Roles & Registration**
+3. Click **Bond as Sequencer** or **Bond as Prover**
+4. The transaction is submitted to the Solaxy mainnet and confirmed on-chain
+
+You can also **Add Bond** (deposit more SOLX) or **Initiate Withdrawal** from the same panel. All transactions appear in the **Transaction History** with explorer links.
+
+### REST API (advanced)
+
+```bash
+# Check sequencer registration
+curl https://mainnet.rpc.solaxy.io/modules/sequencer-registry/state/known-sequencers/items/<celestia_address>
+
+# Check prover registration
+curl https://mainnet.rpc.solaxy.io/modules/prover-incentives/state/bonded-provers/items/<wallet_address>
+
+# Check SOLX balance
+curl https://mainnet.rpc.solaxy.io/modules/bank/tokens/gas_token/balances/<wallet_address>
+```
+
+## Wallet
 
 Each node generates a Solana keypair (`~/svm-rollup/node-wallet.json`) during installation. This wallet is used for:
 
@@ -83,126 +80,24 @@ Each node generates a Solana keypair (`~/svm-rollup/node-wallet.json`) during in
 - **Sequencer identity** — configured as `rollup_address` in `config.toml`
 - **Operator incentives** — configured as `reward_address` in `genesis/operator_incentives.json`
 
-### Bond Requirements
+The installer automatically configures all three files. For existing installs that still use the default team wallet, open the dashboard — it detects the mismatch and offers a one-click fix.
 
-To participate as a sequencer or prover, the wallet must be funded **on the Solaxy rollup** (not on Solana mainnet):
+### Celestia Wallets
 
-| Role | Minimum Bond | Purpose |
-|---|---|---|
-| **Sequencer** | 10,000 SOLX | Registration bond for standard sequencer |
-| **Prover (ZK)** | 200,000 SOLX | Bond for generating ZK proofs |
-| **Total** | **210,000 SOLX** | Minimum to register as both |
+The node uses **two** Celestia wallets:
 
-### On-Chain Registration
+| Wallet | Purpose |
+|---|---|
+| **Bridge Node** (`celestia1...`) | Pays for Celestia transactions, shown in dashboard |
+| **DA Signer** (`celestia1...`) | Pays for DA blob submissions from the svm-rollup node |
 
-Having a funded wallet is not enough — you must **register on-chain** as a sequencer and/or prover. The node does NOT register automatically.
-
-> **Current status:** On-chain registration requires sovereign module transactions, which the Solaxy RPC does not yet expose. The current sequencer was registered at genesis. Once the Solaxy team enables sovereign transaction submission via JSON-RPC, registration will be possible from the dashboard. In the meantime, use the **Readiness Check** to verify your wallet meets all requirements.
-
-**Registration requirements:**
-
-1. **Fund your wallet** — your node wallet must hold enough SOLX (on the Solaxy rollup, not Solana mainnet)
-2. **Register as sequencer** — requires a `sequencer_registry::register` sovereign module call with your Celestia DA address and bond amount (min 10,000 SOLX)
-3. **Register as prover** (optional) — requires a `prover_incentives::register` sovereign module call with bond amount (min 200,000 SOLX)
-
-**Using the Dashboard:**
-
-Open `http://<your-ip>:5555` and navigate to the **Registration** panel. The dashboard shows:
-- Current registration status (sequencer / prover)
-- SOLX balance and minimum bond requirements
-- **Readiness Check** — simulates registration to verify your wallet has sufficient balance and meets all requirements
-
-**REST API (for advanced users):**
-
-```bash
-# Check sequencer registration (keyed by Celestia DA address)
-curl http://127.0.0.1:8899/modules/sequencer-registry/state/known-sequencers/items/<celestia_address>
-
-# Check prover registration (keyed by rollup wallet address)
-curl http://127.0.0.1:8899/modules/prover-incentives/state/bonded-provers/items/<wallet_address>
-
-# Check SOLX balance
-curl http://127.0.0.1:8899/modules/bank/tokens/gas_token/balances/<wallet_address>
-
-# Check minimum bonds
-curl http://127.0.0.1:8899/modules/sequencer-registry/state/minimum-bond
-curl http://127.0.0.1:8899/modules/prover-incentives/state/minimum-bond
-
-# Simulate sequencer registration (readiness check)
-curl -X POST http://127.0.0.1:8899/rollup/simulate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sender": "<raw_pubkey_hex_32bytes>",
-    "call": {
-      "sequencer_registry": {
-        "register": {
-          "amount": "10000",
-          "da_address": "<your_celestia_address>"
-        }
-      }
-    }
-  }'
-
-# Simulate prover registration (readiness check)
-curl -X POST http://127.0.0.1:8899/rollup/simulate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sender": "<raw_pubkey_hex_32bytes>",
-    "call": {
-      "prover_incentives": {
-        "register": "200000"
-      }
-    }
-  }'
-```
-
-> **Note:** The `sender` field in the simulate API is the hex-encoded raw 32-byte public key (not base58, not SHA256). The dashboard handles this automatically. You can derive it with: `python3 -c "import base58; print(base58.b58decode('<your_address>').hex())"`
-
-### Wallet Setup (New Install)
-
-The installer automatically configures all three files with your node wallet. No manual steps needed.
-
-### Wallet Setup (Existing Install)
-
-If your node was installed before this update, the config may still use the default team wallet. You have two options:
-
-**Option A — Dashboard (recommended):**
-Open the dashboard and look for the **Wallet & Bond Status** panel. If a mismatch is detected, click **"Apply Wallet & Resync Now"**.
-
-**Option B — Re-run the installer:**
-```bash
-curl -sSL https://raw.githubusercontent.com/Marcolist/SolaxyEasyNode/main/install.sh | bash
-```
-The installer detects the old wallet and offers to update + resync.
-
-> **Warning:** Changing the wallet requires a full data wipe and resync from genesis. The node will re-import the 20 GB state export and sync all blocks from scratch. This can take several hours depending on your hardware.
-
-### Verify Wallet Configuration
-
-```bash
-# Check which wallet is configured
-grep -E "prover_address|rollup_address" ~/svm-rollup/config.toml
-cat ~/svm-rollup/genesis/operator_incentives.json
-
-# Check your node wallet address
-python3 -c "
-import json
-alphabet = b'123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-def b58(data):
-    n = int.from_bytes(data, 'big'); r = b''
-    while n > 0: n, m = divmod(n, 58); r = alphabet[m:m+1] + r
-    return r.decode()
-print(b58(bytes(json.load(open('$HOME/svm-rollup/node-wallet.json'))[32:])))
-"
-```
-
-All three addresses should match your node wallet.
+Both need TIA funding. The DA Signer address is derived from `[da].signer_private_key` in `config.toml` and is displayed in the dashboard under Node Identity.
 
 ## After Installation
 
 - **Dashboard**: `http://<your-ip>:5555`
-- **RPC Endpoint**: `http://127.0.0.1:8899`
-- **Config**: `~/svm-rollup/config.toml` (also editable from the dashboard Settings panel)
+- **RPC**: JSON-RPC at `http://127.0.0.1:8080/rpc`, REST at `http://127.0.0.1:8899`
+- **Config**: `~/svm-rollup/config.toml` (also editable from dashboard Settings)
 - **Node Wallet**: `~/svm-rollup/node-wallet.json`
 - **Logs**: `journalctl -u solaxy-node -f`
 
@@ -215,7 +110,7 @@ sudo systemctl status solaxy-node celestia-bridge solaxy-dashboard
 # Restart
 sudo systemctl restart solaxy-node
 
-# Logs (follow)
+# Logs
 journalctl -u solaxy-node -f
 journalctl -u celestia-bridge -f
 ```
@@ -225,16 +120,28 @@ Or use the **Settings** panel in the dashboard to start/stop/restart services.
 ## Dashboard Features
 
 - Real-time sync progress for Solaxy and Celestia
+- Bond management: Register, Add Bond, Withdraw for each role
+- Transaction history with Solaxy Explorer links
 - PostgreSQL stats (blocks, transactions, accounts)
 - Server resource monitoring (CPU, memory, disk, network)
-- Node identity and wallet info (LAN IP, hostname, public IP)
-- Wallet & bond status with one-click resync
-- Reward model & node roles reference
-- **Settings panel**: Edit all `config.toml` values and manage services from the UI
+- Node identity and wallet info (including DA Signer wallet)
+- Settings panel: edit `config.toml` and manage services from the UI
+- Version tracking (`/api/version`)
 
-## Network Map Integration
+## Celestia Bridge Node
 
-The dashboard sends periodic heartbeats to the [Public Validator Map](https://map.orbitnode.dev). The heartbeat payload includes:
+| | Details |
+|---|---|
+| **Network** | Celestia Mainnet (`--p2p.network celestia`) |
+| **Disk** | ~20-50 GB (with pruning) |
+| **RAM** | ~4-8 GB |
+| **Sync** | Hours (from genesis DA height) |
+| **Pruning** | Dynamic — genesis-to-head + 48h buffer (min 720h) |
+| **RPC Auth** | Skipped (`--rpc.skip-auth`) |
+
+## Network Map
+
+The dashboard sends periodic heartbeats to the [Public Validator Map](https://map.orbitnode.dev):
 
 ```json
 {
@@ -242,27 +149,17 @@ The dashboard sends periodic heartbeats to the [Public Validator Map](https://ma
   "uptime_seconds": 86400,
   "slot": 21093341,
   "da_height": 10259382,
-  "configured_wallet": "351wxoAtyTjJV63h2gru4YrPmZWwBZRonJe5Z3Bxkt97",
-  "bond_status": "bonded | unbonded | not_configured | unknown",
-  "roles": ["sequencer", "prover"]
+  "configured_wallet": "...",
+  "bond_status": "bonded | unbonded | not_configured",
+  "roles": ["sequencer", "prover"],
+  "version": "1.0.0"
 }
 ```
-
-| Field | Description |
-|---|---|
-| `sync_status` | Node sync state (`synced`, `syncing`, `offline`) |
-| `uptime_seconds` | Seconds since solaxy-node service started |
-| `slot` | Current SVM slot number |
-| `da_height` | Current synced DA (Celestia) block height |
-| `configured_wallet` | The wallet address configured for rewards/bond |
-| `bond_status` | `bonded` (sufficient SOLX for at least one role), `unbonded` (wallet configured but insufficient funds), `not_configured` (still using team wallet), `unknown` (could not check) |
-| `roles` | Active roles based on balance: `sequencer` (>=10k SOLX), `prover` (>=200k SOLX) |
 
 ## Requirements
 
 - Ubuntu 22.04 / 24.04 (or Debian-based)
 - 4+ CPU cores, 8+ GB RAM, 100+ GB SSD
-- Internet connection
 
 ## File Structure
 
@@ -272,13 +169,12 @@ The dashboard sends periodic heartbeats to the [Public Validator Map](https://ma
 ├── config.toml             # Node configuration
 ├── node-wallet.json        # Solana keypair
 ├── genesis/                # Genesis state
-│   └── chain_state_zk.json # Contains genesis_da_height for SyncFromHeight
-└── data/                   # Chain data (grows over time)
+└── data/                   # Chain data
 
 ~/dashboard/
 ├── app.py                  # Flask dashboard
-└── templates/
-    └── index.html
+├── dashboard.conf          # DB password (chmod 600, gitignored)
+└── templates/index.html
 
 ~/.celestia-bridge/         # Celestia bridge node store & keys
 ```
@@ -287,26 +183,22 @@ The dashboard sends periodic heartbeats to the [Public Validator Map](https://ma
 
 | Service | Description |
 |---|---|
-| `celestia-bridge` | Celestia bridge node (Mainnet, `Restart=always`) |
+| `celestia-bridge` | Celestia bridge node |
 | `solaxy-node` | SVM rollup node (depends on Celestia + PostgreSQL) |
 | `solaxy-dashboard` | Web dashboard on port 5555 |
 
 ## Troubleshooting
 
 ```bash
-# Check if all services are running
+# Check services
 sudo systemctl status solaxy-node celestia-bridge solaxy-dashboard postgresql
 
-# View recent errors
+# View errors
 journalctl -u solaxy-node --since "10 min ago" --no-pager
-journalctl -u celestia-bridge --since "10 min ago" --no-pager
 
 # Restart everything
 sudo systemctl restart celestia-bridge solaxy-node solaxy-dashboard
 
-# If Celestia bridge fails to start, check core endpoint
+# Celestia connectivity
 nc -w 3 rpc.celestia.pops.one 9090 && echo "OK" || echo "NOT REACHABLE"
-
-# If rollup can't connect to Celestia RPC, verify --rpc.skip-auth is set
-grep ExecStart /etc/systemd/system/celestia-bridge.service
 ```
