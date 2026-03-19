@@ -27,6 +27,25 @@ except ImportError:
 
 app = Flask(__name__)
 
+EASYNODE_VERSION = "1.0.0"
+
+
+def _read_db_password():
+    """Read PostgreSQL password from dashboard.conf, fallback to 'secret' for old installs."""
+    conf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.conf")
+    if os.path.isfile(conf):
+        try:
+            with open(conf) as f:
+                for line in f:
+                    if line.startswith("DB_PASSWORD="):
+                        return line.split("=", 1)[1].strip()
+        except Exception:
+            pass
+    return "secret"
+
+
+DB_PASSWORD = _read_db_password()
+
 # Cache for expensive CLI calls
 _cache = {}
 _cache_lock = threading.Lock()
@@ -180,11 +199,51 @@ def _get_node_stats_for_map():
         with _block_stats_lock:
             da_height = _block_stats.get("last_da") or 0
 
+    # Wallet & bond info
+    configured_wallet = ""
+    bond_status = "unknown"
+    roles = []
+    try:
+        cfg = parse_config()
+        configured_wallet = cfg.get("proof_manager", {}).get("prover_address", "")
+
+        if configured_wallet and configured_wallet != SOLAXY_TEAM_WALLET:
+            # Check actual on-chain registration via REST API
+            try:
+                cel_addr = _get_celestia_address()
+                if cel_addr:
+                    r = requests.get(
+                        f"http://127.0.0.1:8899/modules/sequencer-registry/state/known-sequencers/items/{cel_addr}",
+                        timeout=3,
+                    )
+                    if r.status_code == 200:
+                        roles.append("sequencer")
+            except Exception:
+                pass
+            try:
+                r = requests.get(
+                    f"http://127.0.0.1:8899/modules/prover-incentives/state/bonded-provers/items/{configured_wallet}",
+                    timeout=3,
+                )
+                if r.status_code == 200:
+                    roles.append("prover")
+            except Exception:
+                pass
+            bond_status = "bonded" if roles else "unbonded"
+        elif configured_wallet == SOLAXY_TEAM_WALLET:
+            bond_status = "not_configured"
+    except Exception:
+        pass
+
     return {
         "sync_status": sync_status,
         "uptime_seconds": uptime_seconds,
         "slot": slot,
         "da_height": da_height,
+        "configured_wallet": configured_wallet,
+        "bond_status": bond_status,
+        "roles": roles,
+        "version": EASYNODE_VERSION,
     }
 
 
@@ -485,8 +544,8 @@ def _check_auth():
     # Allow static files without auth
     if request.path.startswith("/static/"):
         return None
-    # Allow login/setup API without auth
-    if request.path in ("/api/login", "/api/set-password"):
+    # Allow login/setup/version API without auth
+    if request.path in ("/api/login", "/api/set-password", "/api/version"):
         return None
     # No password set yet — show setup page (allow everything for first visit)
     if not _has_password():
@@ -1046,7 +1105,7 @@ def _rpc_call(url, method, params=None, timeout=5):
         return None
 
 
-LOCAL_RPC = "http://127.0.0.1:8080"
+LOCAL_RPC = "http://127.0.0.1:8080/rpc"
 
 # Block / DA processing rate measurement
 _block_stats = {
@@ -1067,12 +1126,14 @@ def _block_time_loop():
         # Measure SVM slot rate via RPC
         slot = _rpc_call(LOCAL_RPC, "getSlot")
 
-        # Measure DA height rate from latest journal line
-        da_line = run_cmd(
-            "journalctl -u solaxy-node.service -n 20 --no-pager 2>/dev/null"
-            " | grep -oP 'fork_point_height=\\K\\d+' | tail -1"
-        )
-        da_height = int(da_line) if da_line and da_line.isdigit() else None
+        # Measure DA height rate from REST API (more reliable than log parsing)
+        da_height = None
+        try:
+            _sync = requests.get(f"{ROLLUP_REST}/rollup/sync-status", timeout=3)
+            if _sync.status_code == 200:
+                da_height = _sync.json().get("synced", {}).get("synced_da_height")
+        except Exception:
+            pass
 
         with _block_stats_lock:
             # SVM slots
@@ -1140,6 +1201,16 @@ def parse_solaxy_logs():
                 info["target_da_height"] = int(m.group(1))
         if len(info) >= 6:
             break
+    # Fallback: if logs don't contain sync data, query the REST API directly
+    if "synced_da_height" not in info:
+        try:
+            r = requests.get(f"{ROLLUP_REST}/rollup/sync-status", timeout=3)
+            if r.status_code == 200:
+                sync = r.json().get("synced", {})
+                if "synced_da_height" in sync:
+                    info["synced_da_height"] = sync["synced_da_height"]
+        except Exception:
+            pass
     # If we have synced height but no target, node is caught up -- set target = synced
     if "synced_da_height" in info and "target_da_height" not in info:
         info["target_da_height"] = info["synced_da_height"]
@@ -1202,7 +1273,7 @@ def celestia_p2p():
 def db_stats():
     """Get PostgreSQL stats."""
     try:
-        conn = psycopg2.connect(dbname="svm", user="postgres", password="secret", host="localhost")
+        conn = psycopg2.connect(dbname="svm", user="postgres", password=DB_PASSWORD, host="localhost")
         cur = conn.cursor()
         stats = {}
         for table in ("blocks", "transactions", "accounts"):
@@ -1235,7 +1306,7 @@ def prometheus_stats():
         return {}
 
 
-PUBLIC_RPC = "https://mainnet.rpc.solaxy.io"
+PUBLIC_RPC = "https://mainnet.rpc.solaxy.io/rpc"
 SOLX_WALLET_PATH = os.path.expanduser("~/svm-rollup/node-wallet.json")
 
 
@@ -1384,6 +1455,11 @@ def index():
     return render_template("index.html", celestia_service=CELESTIA_SERVICE)
 
 
+@app.route("/api/version")
+def api_version():
+    return jsonify({"version": EASYNODE_VERSION})
+
+
 @app.route("/api/stats")
 def api_stats():
     solaxy_svc = systemd_status("solaxy-node.service")
@@ -1526,6 +1602,23 @@ def node_identity():
             info["solx_balance"] = str(result.get("value", 0))
         else:
             info["solx_balance"] = "0"
+    # DA signer wallet — the account used by svm-rollup to submit blobs to Celestia.
+    # This is different from the bridge-node wallet and needs its own TIA funding.
+    info["da_signer_address"] = _get_da_signer_address()
+    if info["da_signer_address"]:
+        try:
+            r = requests.get(
+                f"https://celestia-rest.publicnode.com/cosmos/bank/v1beta1/balances/{info['da_signer_address']}",
+                timeout=5,
+            )
+            if r.status_code == 200:
+                bals = r.json().get("balances", [])
+                utia = next((b["amount"] for b in bals if b["denom"] == "utia"), "0")
+                info["da_signer_tia_balance"] = utia
+            else:
+                info["da_signer_tia_balance"] = "0"
+        except Exception:
+            info["da_signer_tia_balance"] = "0"
     return info
 
 
@@ -1749,6 +1842,557 @@ def api_config_post():
         run_cmd("sudo systemctl restart solaxy-node.service", timeout=15)
 
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Wallet Configuration & Resync API
+# ---------------------------------------------------------------------------
+
+GENESIS_DIR = os.path.expanduser("~/svm-rollup/genesis")
+DATA_DIR = os.path.expanduser("~/svm-rollup/data")
+SOLAXY_TEAM_WALLET = "HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+
+
+def _get_node_wallet_address():
+    """Read the node wallet public key from node-wallet.json."""
+    try:
+        import base58
+        with open(SOLX_WALLET_PATH) as f:
+            full = json.load(f)
+            pub_bytes = bytes(full[32:])
+            return base58.b58encode(pub_bytes).decode()
+    except Exception:
+        return None
+
+
+def _get_configured_wallet():
+    """Read the currently configured wallet from config.toml."""
+    cfg = parse_config()
+    return cfg.get("proof_manager", {}).get("prover_address", "")
+
+
+@app.route("/api/wallet-status")
+def api_wallet_status():
+    """Return wallet configuration status and bond readiness."""
+    node_wallet = _get_node_wallet_address()
+    configured_wallet = _get_configured_wallet()
+
+    # Check if operator_incentives.json points to node wallet
+    operator_wallet = ""
+    op_file = os.path.join(GENESIS_DIR, "operator_incentives.json")
+    try:
+        with open(op_file) as f:
+            operator_wallet = json.load(f).get("reward_address", "")
+    except Exception:
+        pass
+
+    # Check if data dir has state (genesis already imported)
+    has_state = os.path.isdir(DATA_DIR) and any(
+        os.path.isdir(os.path.join(DATA_DIR, d))
+        for d in ["state-db", "ledger", "user_nomt_db"]
+    )
+
+    using_team_wallet = configured_wallet == SOLAXY_TEAM_WALLET
+    wallet_mismatch = node_wallet and configured_wallet != node_wallet
+    operator_mismatch = node_wallet and operator_wallet != node_wallet
+    needs_resync = wallet_mismatch or operator_mismatch
+
+    return jsonify({
+        "node_wallet": node_wallet or "",
+        "configured_wallet": configured_wallet,
+        "operator_wallet": operator_wallet,
+        "using_team_wallet": using_team_wallet,
+        "wallet_mismatch": wallet_mismatch,
+        "operator_mismatch": operator_mismatch,
+        "has_state": has_state,
+        "needs_resync": needs_resync and has_state,
+    })
+
+
+@app.route("/api/wallet-apply", methods=["POST"])
+def api_wallet_apply():
+    """Apply node wallet to config.toml + operator_incentives.json, optionally resync."""
+    node_wallet = _get_node_wallet_address()
+    if not node_wallet:
+        return jsonify({"error": "Could not read node wallet"}), 500
+
+    data = request.get_json() or {}
+    resync = data.get("resync", False)
+
+    # Update config.toml
+    try:
+        cfg = parse_config()
+        if "proof_manager" in cfg:
+            cfg["proof_manager"]["prover_address"] = node_wallet
+        if "sequencer" in cfg:
+            cfg["sequencer"]["rollup_address"] = node_wallet
+        write_config(cfg)
+    except Exception as e:
+        return jsonify({"error": f"config.toml update failed: {e}"}), 500
+
+    # Update operator_incentives.json
+    op_file = os.path.join(GENESIS_DIR, "operator_incentives.json")
+    try:
+        with open(op_file) as f:
+            op_data = json.load(f)
+        op_data["reward_address"] = node_wallet
+        with open(op_file, "w") as f:
+            json.dump(op_data, f, indent=2)
+            f.write("\n")
+    except Exception as e:
+        return jsonify({"error": f"operator_incentives.json update failed: {e}"}), 500
+
+    result = {"ok": True, "wallet": node_wallet, "resynced": False}
+
+    if resync:
+        # Stop node, wipe data, truncate DB
+        run_cmd("sudo systemctl stop solaxy-node.service", timeout=30)
+        try:
+            import shutil as _shutil
+            if os.path.isdir(DATA_DIR):
+                _shutil.rmtree(DATA_DIR)
+            os.makedirs(DATA_DIR, exist_ok=True)
+        except Exception as e:
+            return jsonify({"error": f"Data wipe failed: {e}"}), 500
+
+        # Truncate PostgreSQL
+        try:
+            conn = psycopg2.connect(
+                host="localhost", database="svm",
+                user="postgres", password=DB_PASSWORD
+            )
+            conn.autocommit = True
+            cur = conn.cursor()
+            cur.execute(
+                "TRUNCATE transactions, accounts_transactions, accounts, blocks CASCADE"
+            )
+            cur.close()
+            conn.close()
+        except Exception:
+            pass
+
+        # Start node again
+        run_cmd("sudo systemctl start solaxy-node.service", timeout=30)
+        result["resynced"] = True
+
+    else:
+        # Just restart node to pick up config changes
+        run_cmd("sudo systemctl restart solaxy-node.service", timeout=15)
+
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# Sequencer & Prover Registration API
+# ---------------------------------------------------------------------------
+
+ROLLUP_REST = "http://127.0.0.1:8899"
+ROLLUP_RPC = "http://127.0.0.1:8899/rpc"
+
+
+def _get_celestia_address():
+    """Get the node's Celestia DA address."""
+    raw = run_cmd(f"celestia state account-address --node.store {CELESTIA_STORE}")
+    try:
+        return json.loads(raw).get("result", "")
+    except Exception:
+        return ""
+
+
+def _get_da_signer_address():
+    """Get the DA blob-signer address used by the svm-rollup node.
+
+    This is the Celestia account that pays for DA blob submissions.  It is
+    derived from ``[da].signer_private_key`` in config.toml and is distinct
+    from the bridge-node wallet.  Because the key derivation is internal to
+    the rollup binary, we extract the address from recent journal logs where
+    the node reports it in blob-submission error/info messages.
+    """
+    # Fast path: cached value
+    cached = _cache.get("da_signer_address")
+    if cached and time.time() - cached[1] < 3600:
+        return cached[0]
+
+    addr = ""
+    try:
+        raw = subprocess.check_output(
+            ["journalctl", "-u", "solaxy-node", "--since", "24 hours ago",
+             "--no-pager", "-q", "--output=cat"],
+            text=True, timeout=5,
+        )
+        for line in raw.splitlines():
+            if "celestia1" in line and "submit_blob" in line:
+                # Example: account celestia1jxy4vvcvquse65x4mt0jz7xg5wakwdp92y96tg not found
+                idx = line.find("celestia1")
+                if idx >= 0:
+                    candidate = line[idx:].split()[0].rstrip('",')
+                    if len(candidate) > 20:
+                        addr = candidate
+                        break
+    except Exception:
+        pass
+
+    with _cache_lock:
+        _cache["da_signer_address"] = (addr, time.time())
+    return addr
+
+
+def _get_credential_id(address):
+    """Compute the sovereign SDK credential ID (SHA256 of pubkey bytes)."""
+    try:
+        import base58
+        pubkey_bytes = base58.b58decode(address)
+        return hashlib.sha256(pubkey_bytes).hexdigest()
+    except Exception:
+        return ""
+
+
+def _get_pubkey_hex(address):
+    """Get the raw 32-byte public key as hex string (for /rollup/simulate sender)."""
+    try:
+        import base58
+        pubkey_bytes = base58.b58decode(address)
+        return pubkey_bytes.hex()
+    except Exception:
+        return ""
+
+
+@app.route("/api/registration-status")
+def api_registration_status():
+    """Check sequencer and prover on-chain registration status."""
+    wallet = _get_node_wallet_address()
+    cel_addr = _get_celestia_address()
+
+    result = {
+        "wallet": wallet or "",
+        "celestia_address": cel_addr,
+        "sequencer_registered": False,
+        "sequencer_bond": "0",
+        "prover_registered": False,
+        "prover_bond": "0",
+        "gas_balance": "0",
+        "minimum_seq_bond": "0",
+        "minimum_prover_bond": "0",
+        "has_sovereign_account": False,
+    }
+
+    # Check sovereign bank balance (gas token)
+    if wallet:
+        try:
+            r = requests.get(
+                f"{ROLLUP_REST}/modules/bank/tokens/gas_token/balances/{wallet}",
+                timeout=5,
+            )
+            if r.status_code == 200:
+                result["gas_balance"] = r.json().get("amount", "0")
+        except Exception:
+            pass
+
+    # Check sovereign account exists
+    if wallet:
+        cred = _get_credential_id(wallet)
+        if cred:
+            try:
+                r = requests.get(
+                    f"{ROLLUP_REST}/modules/accounts/state/accounts/items/{cred}",
+                    timeout=5,
+                )
+                result["has_sovereign_account"] = r.status_code == 200
+            except Exception:
+                pass
+
+    # Check sequencer registration via known-sequencers (keyed by Celestia address)
+    if cel_addr:
+        try:
+            r = requests.get(
+                f"{ROLLUP_REST}/modules/sequencer-registry/state/known-sequencers/items/{cel_addr}",
+                timeout=5,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                result["sequencer_registered"] = True
+                result["sequencer_bond"] = data.get("value", {}).get("balance", "0")
+        except Exception:
+            pass
+
+    # Check prover registration (keyed by rollup address)
+    if wallet:
+        try:
+            r = requests.get(
+                f"{ROLLUP_REST}/modules/prover-incentives/state/bonded-provers/items/{wallet}",
+                timeout=5,
+            )
+            if r.status_code == 200:
+                result["prover_registered"] = True
+                result["prover_bond"] = r.json().get("value", "0")
+        except Exception:
+            pass
+
+    # Get minimum bonds
+    try:
+        r = requests.get(
+            f"{ROLLUP_REST}/modules/sequencer-registry/state/minimum-bond",
+            timeout=3,
+        )
+        if r.status_code == 200:
+            result["minimum_seq_bond"] = r.json().get("value", "0")
+    except Exception:
+        pass
+    try:
+        r = requests.get(
+            f"{ROLLUP_REST}/modules/prover-incentives/state/minimum-bond",
+            timeout=3,
+        )
+        if r.status_code == 200:
+            result["minimum_prover_bond"] = str(r.json().get("value", "0"))
+    except Exception:
+        pass
+
+    return jsonify(result)
+
+
+@app.route("/api/simulate-register", methods=["POST"])
+def api_simulate_register():
+    """Simulate a sequencer or prover registration call."""
+    data = request.get_json() or {}
+    role = data.get("role", "sequencer")  # "sequencer" or "prover"
+    amount = data.get("amount")
+
+    wallet = _get_node_wallet_address()
+    if not wallet:
+        return jsonify({"error": "Node wallet not found"}), 400
+
+    pubkey_hex = _get_pubkey_hex(wallet)
+    if not pubkey_hex:
+        return jsonify({"error": "Could not derive public key hex"}), 400
+
+    if role == "sequencer":
+        cel_addr = _get_celestia_address()
+        if not cel_addr:
+            return jsonify({"error": "Celestia DA address not found"}), 400
+        if not amount:
+            amount = "10000"
+        call_body = {
+            "sequencer_registry": {
+                "register": {
+                    "amount": str(amount),
+                    "da_address": cel_addr,
+                }
+            }
+        }
+    elif role == "prover":
+        if not amount:
+            amount = "200000"
+        call_body = {
+            "prover_incentives": {
+                "register": str(amount),
+            }
+        }
+    else:
+        return jsonify({"error": f"Unknown role: {role}"}), 400
+
+    payload = {
+        "sender": pubkey_hex,
+        "call": call_body,
+    }
+
+    try:
+        r = requests.post(
+            f"{ROLLUP_REST}/rollup/simulate",
+            json=payload,
+            timeout=15,
+        )
+        if r.status_code == 200:
+            result = r.json()
+            return jsonify({"ok": True, "result": result})
+        else:
+            return jsonify({
+                "ok": False,
+                "error": r.text[:500],
+                "status_code": r.status_code,
+            })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/submit-register", methods=["POST"])
+def api_submit_register():
+    """Submit an actual sequencer or prover registration transaction.
+
+    This builds a Solana-compatible transaction with the sovereign module call
+    and submits it via sendTransaction.  The transaction must then be batched
+    by the active sequencer to take effect.
+    """
+    data = request.get_json() or {}
+    role = data.get("role", "sequencer")
+    amount = data.get("amount")
+    app.logger.warning("submit-register called: role=%s amount=%s action=%s data=%s", role, amount, data.get("action"), data)
+
+    wallet = _get_node_wallet_address()
+    if not wallet:
+        return jsonify({"error": "Node wallet not found"}), 400
+
+    cel_addr = _get_celestia_address()
+
+    # Get raw pubkey hex for simulate sender
+    pubkey_hex = _get_pubkey_hex(wallet)
+    if not pubkey_hex:
+        return jsonify({"error": "Could not derive public key hex"}), 400
+
+    action = data.get("action", "register")
+
+    if role == "sequencer":
+        if not cel_addr:
+            return jsonify({"error": "Celestia DA address not found"}), 400
+        if not amount:
+            amount = "10000"
+        if action == "deposit":
+            call_body = {
+                "sequencer_registry": {
+                    "deposit": {
+                        "amount": str(amount),
+                        "da_address": cel_addr,
+                    }
+                }
+            }
+        elif action == "withdraw":
+            call_body = {
+                "sequencer_registry": {
+                    "initiate_withdrawal": {
+                        "da_address": cel_addr,
+                    }
+                }
+            }
+        else:
+            call_body = {
+                "sequencer_registry": {
+                    "register": {
+                        "amount": str(amount),
+                        "da_address": cel_addr,
+                    }
+                }
+            }
+    elif role == "prover":
+        if not amount:
+            amount = "200000"
+        if action == "deposit":
+            call_body = {"prover_incentives": {"deposit": str(amount)}}
+        elif action == "withdraw":
+            call_body = {"prover_incentives": {"exit": None}}
+        else:
+            call_body = {"prover_incentives": {"register": str(amount)}}
+    else:
+        return jsonify({"error": f"Unknown role: {role}"}), 400
+
+    # Simulate first (use mainnet REST for up-to-date state)
+    MAINNET_REST = "https://mainnet.rpc.solaxy.io"
+    try:
+        sim_resp = requests.post(
+            f"{MAINNET_REST}/rollup/simulate",
+            json={"sender": pubkey_hex, "call": call_body},
+            timeout=15,
+        )
+        if sim_resp.status_code == 200:
+            sim_result = sim_resp.json()
+            if sim_result.get("outcome") == "reverted":
+                detail = sim_result.get("detail", {}).get("message", "Unknown error")
+                return jsonify({
+                    "ok": False,
+                    "error": f"Simulation failed: {detail}",
+                    "phase": "simulate",
+                })
+        elif sim_resp.status_code != 0:
+            return jsonify({
+                "ok": False,
+                "error": f"Simulation error: {sim_resp.text[:300]}",
+                "phase": "simulate",
+            })
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": f"Simulation request failed: {e}",
+            "phase": "simulate",
+        })
+
+    # Build and submit the sovereign module TX via the mainnet REST API.
+    action = data.get("action", "register")
+    try:
+        import struct as _struct
+        import nacl.signing as _nacl
+        import bech32 as _bech32
+
+        _bu8 = lambda v: _struct.pack('<B', v)
+        _bu32 = lambda v: _struct.pack('<I', v)
+        _bu64 = lambda v: _struct.pack('<Q', v)
+        _bu128 = lambda v: _struct.pack('<QQ', v & 0xFFFFFFFFFFFFFFFF, v >> 64)
+        _bvec = lambda b: _bu32(len(b)) + b
+
+        CHAIN_HASH = bytes.fromhex(
+            "062c1627547ca7d6d4a7ad2beb516034515e7e6f2dd011096d01ccc970c640b3"
+        )
+        CHAIN_ID = 4321
+        MAINNET_REST = "https://mainnet.rpc.solaxy.io"
+
+        with open(os.path.expanduser("~/svm-rollup/node-wallet.json")) as _f:
+            _kp = bytes(json.load(_f))
+        _sk = _nacl.SigningKey(_kp[:32])
+        _pk = bytes(_sk.verify_key)
+
+        if role == "sequencer":
+            _hrp, _d5 = _bech32.bech32_decode(cel_addr)
+            _cel_raw = bytes(_bech32.convertbits(_d5, 5, 8, False))
+            # SequencerRegistry CallMessage variants:
+            # 0=Register, 1=Deposit, 2=InitiateWithdrawal, 3=Withdraw
+            if action == "deposit":
+                _rc = _bu8(1) + _bu8(1) + _bvec(_cel_raw) + _bu128(int(amount))
+            elif action == "withdraw":
+                _rc = _bu8(1) + _bu8(2) + _bvec(_cel_raw)
+            else:
+                _rc = _bu8(1) + _bu8(0) + _bvec(_cel_raw) + _bu128(int(amount))
+        else:
+            # ProverIncentives CallMessage: 0=Register, 1=Deposit, 2=Exit
+            if action == "deposit":
+                _rc = _bu8(3) + _bu8(1) + _bu128(int(amount))
+            elif action == "withdraw":
+                _rc = _bu8(3) + _bu8(2)
+            else:
+                _rc = _bu8(3) + _bu8(0) + _bu128(int(amount))
+
+        _uniq = _bu8(1) + _bu64(int(time.time() * 1000))
+        _det = _bu64(0) + _bu128(10_000_000) + b'\x00' + _bu64(CHAIN_ID)
+        _utx = _rc + _uniq + _det
+        _sig = _sk.sign(_utx + CHAIN_HASH).signature
+        _tx = _bu8(0) + _sig + _pk + _rc + _uniq + _det
+
+        import base64 as _b64
+        _b64_tx = _b64.b64encode(_tx).decode()
+
+        submit_resp = requests.post(
+            f"{MAINNET_REST}/sequencer/txs",
+            json={"body": _b64_tx},
+            timeout=30,
+        )
+        if submit_resp.status_code == 200:
+            sub_data = submit_resp.json()
+            return jsonify({
+                "ok": True,
+                "phase": "submitted",
+                "tx_hash": sub_data.get("id", ""),
+                "receipt": sub_data.get("receipt", {}),
+                "events": sub_data.get("events", []),
+            })
+        else:
+            return jsonify({
+                "ok": False,
+                "error": f"Submission failed (HTTP {submit_resp.status_code}): {submit_resp.text[:300]}",
+                "phase": "submit",
+            })
+    except Exception as e:
+        return jsonify({
+            "ok": False,
+            "error": f"TX build/submit failed: {e}",
+            "phase": "submit",
+        })
 
 
 # ---------------------------------------------------------------------------

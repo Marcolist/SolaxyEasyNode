@@ -472,9 +472,30 @@ log "Setting up PostgreSQL..."
 sudo systemctl enable postgresql
 sudo systemctl start postgresql
 
+# ---------------------------------------------------------------------------
+# PostgreSQL password — read from dashboard.conf or generate a new one
+# ---------------------------------------------------------------------------
+DASHBOARD_CONF="$USER_HOME/dashboard/dashboard.conf"
+if [[ -f "$DASHBOARD_CONF" ]]; then
+    PG_PASS=$(grep -oP '^DB_PASSWORD=\K.*' "$DASHBOARD_CONF" 2>/dev/null || true)
+fi
+if [[ -z "$PG_PASS" ]]; then
+    # Existing installs with "secret" — keep it for backward compat
+    if sudo -u postgres psql -c "SELECT 1" -h localhost -U postgres 2>/dev/null | grep -q 1; then
+        PG_PASS="secret"
+    else
+        PG_PASS=$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)
+        log "Generated random PostgreSQL password."
+    fi
+    mkdir -p "$(dirname "$DASHBOARD_CONF")"
+    echo "DB_PASSWORD=${PG_PASS}" > "$DASHBOARD_CONF"
+    chmod 600 "$DASHBOARD_CONF"
+    log "Saved DB password to $DASHBOARD_CONF"
+fi
+
 # Create database and user
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='postgres'" | grep -q 1 || true
-sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'secret';" 2>/dev/null || true
+sudo -u postgres psql -c "ALTER USER postgres PASSWORD '${PG_PASS}';" 2>/dev/null || true
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='svm'" | grep -q 1 || \
     sudo -u postgres createdb svm
 
@@ -508,16 +529,55 @@ else
     warn "Node wallet already exists."
 fi
 
-# Display wallet address (informational only - config always uses the official sequencer)
+# Extract wallet address — used for config.toml (prover/sequencer) and genesis
+WALLET_ADDRESS=""
 if [[ -f "$NODE_WALLET_PATH" ]]; then
-    _wallet_addr=""
     if command -v solana-keygen &>/dev/null; then
-        _wallet_addr=$(solana-keygen pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
+        WALLET_ADDRESS=$(solana-keygen pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
     elif [[ -f "$SOLANA_KEYGEN" ]]; then
-        _wallet_addr=$("$SOLANA_KEYGEN" pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
+        WALLET_ADDRESS=$("$SOLANA_KEYGEN" pubkey "$NODE_WALLET_PATH" 2>/dev/null || true)
     fi
-    if [[ -n "$_wallet_addr" ]]; then
-        log "Node wallet address (attester identity): $_wallet_addr"
+    # Fallback: extract pubkey via Python (last 32 bytes → base58)
+    if [[ -z "$WALLET_ADDRESS" ]]; then
+        WALLET_ADDRESS=$(python3 -c "
+import json, base64
+alphabet = b'123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+def b58encode(data):
+    n = int.from_bytes(data, 'big')
+    result = b''
+    while n > 0:
+        n, r = divmod(n, 58)
+        result = alphabet[r:r+1] + result
+    for byte in data:
+        if byte == 0: result = alphabet[0:1] + result
+        else: break
+    return result.decode()
+full = json.load(open('$NODE_WALLET_PATH'))
+print(b58encode(bytes(full[32:])))
+" 2>/dev/null || true)
+    fi
+    if [[ -n "$WALLET_ADDRESS" ]]; then
+        log "Node wallet address: $WALLET_ADDRESS"
+    else
+        warn "Could not extract wallet address from node-wallet.json."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Step 9b: Write wallet address into genesis operator_incentives.json
+# ---------------------------------------------------------------------------
+if [[ -n "$WALLET_ADDRESS" ]]; then
+    OPERATOR_FILE="$USER_HOME/svm-rollup/genesis/operator_incentives.json"
+    if [[ -f "$OPERATOR_FILE" ]]; then
+        python3 -c "
+import json
+with open('$OPERATOR_FILE') as f:
+    data = json.load(f)
+data['reward_address'] = '$WALLET_ADDRESS'
+with open('$OPERATOR_FILE', 'w') as f:
+    json.dump(data, f, indent=2)
+    f.write('\n')
+" 2>/dev/null && log "Updated operator_incentives.json with node wallet." || warn "Could not update operator_incentives.json."
     fi
 fi
 
@@ -543,18 +603,13 @@ signer_private_key = "%%SIGNER_PRIVATE_KEY%%"
 
 [storage]
 path = "data"
-pruner_versions_to_keep = 50
-user_commit_concurrency = 8
-kernel_commit_concurrency = 4
+pruner_versions_to_keep = 100
+user_commit_concurrency = 4
+kernel_commit_concurrency = 2
 user_hashtable_buckets = 16000000
-user_page_cache_size = 4096
-kernel_page_cache_size = 1024
 
 [runner]
-da_polling_interval_ms = 50
-concurrent_sync_tasks = 20
-pre_fetched_blocks_capacity = 100
-save_tx_bodies = true
+da_polling_interval_ms = 200
 
 [runner.http_config]
 bind_host = "127.0.0.1"
@@ -565,12 +620,12 @@ telegraf_address = "127.0.0.1:8094"
 
 [proof_manager]
 aggregated_proof_block_jump = 1
-prover_address = "HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+prover_address = "%%WALLET_ADDRESS%%"
 max_number_of_transitions_in_db = 100
 max_number_of_transitions_in_memory = 30
 
 [sequencer]
-rollup_address = "HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+rollup_address = "%%WALLET_ADDRESS%%"
 max_allowed_node_distance_behind = 5
 max_concurrent_blobs = 128
 max_batch_size_bytes = 1048576
@@ -584,6 +639,7 @@ TMPL
     sed -e "s|%%RPC_AUTH_TOKEN%%|${CELESTIA_AUTH_TOKEN}|g" \
         -e "s|%%GRPC_URL%%|${CELESTIA_GRPC}|g" \
         -e "s|%%SIGNER_PRIVATE_KEY%%|${SIGNER_KEY}|g" \
+        -e "s|%%WALLET_ADDRESS%%|${WALLET_ADDRESS}|g" \
         /tmp/config.toml.template > "$USER_HOME/svm-rollup/config.toml"
 
     rm -f /tmp/config.toml.template
@@ -600,6 +656,101 @@ else
         if [[ "$CURRENT_TOKEN" != "$CELESTIA_AUTH_TOKEN" ]]; then
             log "Updating rpc_auth_token in config.toml (Celestia store changed)..."
             sed -i "s|rpc_auth_token = \".*\"|rpc_auth_token = \"${CELESTIA_AUTH_TOKEN}\"|" "$USER_HOME/svm-rollup/config.toml"
+        fi
+    fi
+
+    # ---- Config migration for binary update (Mar 2026) ----
+    # The new binary changed several config defaults. Migrate old values
+    # to avoid performance issues or deprecation warnings.
+    CFG="$USER_HOME/svm-rollup/config.toml"
+    CONFIG_MIGRATED=false
+
+    # Storage: pruner 50→100, concurrency 8/4→4/2, remove page_cache_size
+    if grep -q 'pruner_versions_to_keep = 50' "$CFG" 2>/dev/null; then
+        sed -i 's|pruner_versions_to_keep = 50|pruner_versions_to_keep = 100|' "$CFG"
+        CONFIG_MIGRATED=true
+    fi
+    if grep -q 'user_commit_concurrency = 8' "$CFG" 2>/dev/null; then
+        sed -i 's|user_commit_concurrency = 8|user_commit_concurrency = 4|' "$CFG"
+        CONFIG_MIGRATED=true
+    fi
+    if grep -q 'kernel_commit_concurrency = 4' "$CFG" 2>/dev/null; then
+        sed -i 's|kernel_commit_concurrency = 4|kernel_commit_concurrency = 2|' "$CFG"
+        CONFIG_MIGRATED=true
+    fi
+    # Remove deprecated page_cache_size settings
+    if grep -q 'user_page_cache_size' "$CFG" 2>/dev/null; then
+        sed -i '/user_page_cache_size/d' "$CFG"
+        CONFIG_MIGRATED=true
+    fi
+    if grep -q 'kernel_page_cache_size' "$CFG" 2>/dev/null; then
+        sed -i '/kernel_page_cache_size/d' "$CFG"
+        CONFIG_MIGRATED=true
+    fi
+
+    # Runner: polling 50→200, remove deprecated keys
+    if grep -q 'da_polling_interval_ms = 50' "$CFG" 2>/dev/null; then
+        sed -i 's|da_polling_interval_ms = 50|da_polling_interval_ms = 200|' "$CFG"
+        CONFIG_MIGRATED=true
+    fi
+    for key in concurrent_sync_tasks pre_fetched_blocks_capacity save_tx_bodies; do
+        if grep -q "$key" "$CFG" 2>/dev/null; then
+            sed -i "/${key}/d" "$CFG"
+            CONFIG_MIGRATED=true
+        fi
+    done
+
+    if $CONFIG_MIGRATED; then
+        log "Migrated config.toml to match new binary defaults."
+    fi
+
+    # Update wallet addresses if they still point to the default team wallet
+    SOLAXY_TEAM_WALLET="HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
+    if [[ -n "$WALLET_ADDRESS" && "$WALLET_ADDRESS" != "$SOLAXY_TEAM_WALLET" ]]; then
+        CURRENT_PROVER=$(grep -oP 'prover_address\s*=\s*"\K[^"]+' "$USER_HOME/svm-rollup/config.toml" 2>/dev/null || true)
+        CURRENT_ROLLUP=$(grep -oP 'rollup_address\s*=\s*"\K[^"]+' "$USER_HOME/svm-rollup/config.toml" 2>/dev/null || true)
+
+        WALLET_CHANGED=false
+        if [[ "$CURRENT_PROVER" == "$SOLAXY_TEAM_WALLET" ]]; then
+            sed -i "s|prover_address = \"${SOLAXY_TEAM_WALLET}\"|prover_address = \"${WALLET_ADDRESS}\"|" "$USER_HOME/svm-rollup/config.toml"
+            WALLET_CHANGED=true
+        fi
+        if [[ "$CURRENT_ROLLUP" == "$SOLAXY_TEAM_WALLET" ]]; then
+            sed -i "s|rollup_address = \"${SOLAXY_TEAM_WALLET}\"|rollup_address = \"${WALLET_ADDRESS}\"|" "$USER_HOME/svm-rollup/config.toml"
+            WALLET_CHANGED=true
+        fi
+
+        if $WALLET_CHANGED; then
+            log "Updated config.toml wallet addresses to node wallet: $WALLET_ADDRESS"
+            echo ""
+            warn "═══════════════════════════════════════════════════════════"
+            warn "  WALLET ADDRESS CHANGED — RESYNC REQUIRED"
+            warn "═══════════════════════════════════════════════════════════"
+            warn "  Your config now uses your own wallet for prover rewards."
+            warn "  For the bond to register correctly, the node data must"
+            warn "  be wiped so genesis is re-imported with your wallet."
+            warn ""
+            warn "  This will stop the node and delete all synced data."
+            warn "  The node will re-sync from scratch (may take hours)."
+            warn "═══════════════════════════════════════════════════════════"
+            echo ""
+            read -rp "  Wipe data and resync now? [y/N] " wipe_answer </dev/tty
+            case "${wipe_answer,,}" in
+                y|yes)
+                    log "Stopping solaxy-node..."
+                    sudo systemctl stop solaxy-node.service 2>/dev/null || true
+                    log "Wiping node data..."
+                    rm -rf "$USER_HOME/svm-rollup/data"
+                    mkdir -p "$USER_HOME/svm-rollup/data"
+                    # Truncate PostgreSQL tables
+                    PGPASSWORD="${PG_PASS}" psql -h localhost -U postgres -d svm \
+                        -c "TRUNCATE transactions, accounts_transactions, accounts, blocks CASCADE;" 2>/dev/null || true
+                    log "Data wiped. Node will re-sync on next start."
+                    ;;
+                *)
+                    warn "Skipped data wipe. You can resync later via the dashboard."
+                    ;;
+            esac
         fi
     fi
 fi
@@ -658,7 +809,7 @@ Type=simple
 WorkingDirectory=${USER_HOME}/svm-rollup
 Environment=SOV_PROVER_MODE=skip
 Environment=RUST_LOG=info
-Environment=DATABASE_URL=postgresql://postgres:secret@localhost:5432/svm
+Environment=DATABASE_URL=postgresql://postgres:${PG_PASS}@localhost:5432/svm
 ExecStart=${USER_HOME}/svm-rollup/svm-rollup --da-layer celestia --rollup-config-path config.toml --genesis-config-dir genesis
 Restart=on-failure
 RestartSec=15
