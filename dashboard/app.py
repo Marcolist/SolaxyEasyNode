@@ -1178,7 +1178,19 @@ def _rpc_call(url, method, params=None, timeout=5):
         return None
 
 
-LOCAL_RPC = "http://127.0.0.1:8080/rpc"
+def _detect_local_rpc():
+    """Auto-detect whether the local RPC needs /rpc path (new binary) or not (old binary)."""
+    for url in ("http://127.0.0.1:8080/rpc", "http://127.0.0.1:8080"):
+        try:
+            r = requests.post(url, json={"jsonrpc": "2.0", "id": 1, "method": "getSlot", "params": []}, timeout=2)
+            if r.status_code == 200 and "result" in r.json():
+                return url
+        except Exception:
+            pass
+    return "http://127.0.0.1:8080/rpc"
+
+
+LOCAL_RPC = _detect_local_rpc()
 
 # Block / DA processing rate measurement
 _block_stats = {
@@ -1379,7 +1391,19 @@ def prometheus_stats():
         return {}
 
 
-PUBLIC_RPC = "https://mainnet.rpc.solaxy.io/rpc"
+def _detect_public_rpc():
+    """Auto-detect whether the public RPC needs /rpc path or not."""
+    for url in ("https://mainnet.rpc.solaxy.io/rpc", "https://mainnet.rpc.solaxy.io"):
+        try:
+            r = requests.post(url, json={"jsonrpc": "2.0", "id": 1, "method": "getSlot", "params": []}, timeout=5)
+            if r.status_code == 200 and "result" in r.json():
+                return url
+        except Exception:
+            pass
+    return "https://mainnet.rpc.solaxy.io/rpc"
+
+
+PUBLIC_RPC = _detect_public_rpc()
 SOLX_WALLET_PATH = os.path.expanduser("~/svm-rollup/node-wallet.json")
 
 
