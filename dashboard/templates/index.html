@@ -169,7 +169,7 @@ canvas.sparkline{vertical-align:middle}
   <div class="header-left">
     <img src="/static/logo.png" alt="Solaxy" class="header-logo">
     <div>
-      <h1>Solaxy Node Dashboard</h1>
+      <h1>Solaxy Node Dashboard <span id="versionBadge" style="font-size:12px;font-weight:400;color:#8b949e;vertical-align:middle"></span></h1>
       <h2 id="nodeHostname">-</h2>
     </div>
   </div>
@@ -236,13 +236,13 @@ canvas.sparkline{vertical-align:middle}
       <span class="badge" id="rpcBadge">-</span>
     </div>
     <div class="stat-grid">
-      <div class="stat"><span class="stat-label">Sovereign Slot (Local)</span><span class="stat-value" style="color:#3fb950" id="sovSlot">-</span></div>
+      <div class="stat"><span class="stat-label">SVM Slot (Local)</span><span class="stat-value" style="color:#3fb950" id="localSvmSlot">-</span></div>
       <div class="stat"><span class="stat-label">SVM Slot (Network)</span><span class="stat-value" id="netSlot">-</span></div>
-      <div class="stat"><span class="stat-label">DA Batches (Network)</span><span class="stat-value" style="color:#58a6ff" id="netTxCount">-</span></div>
+      <div class="stat"><span class="stat-label">Slot Diff</span><span class="stat-value" id="slotDiff">-</span></div>
       <div class="stat"><span class="stat-label">Network Epoch</span><span class="stat-value" id="netEpoch">-</span></div>
     </div>
     <div style="margin-top:8px;font-size:11px;color:#484f58">
-      <div>SVM Slot (genesis export): <span id="localSvmSlot">-</span> (static, only preferred sequencer advances this)</div>
+      <div>Sovereign Slot: <span id="sovSlot">-</span> · DA Batches: <span id="netTxCount" style="color:#58a6ff">-</span></div>
       <div style="margin-top:2px">via mainnet.rpc.solaxy.io</div>
     </div>
   </div>
@@ -377,87 +377,28 @@ canvas.sparkline{vertical-align:middle}
   </div>
 </div>
 
-<!-- Reward Model Info -->
+<!-- Node Roles & Registration -->
 <div class="info-toggle" id="infoToggle" onclick="toggleInfo()">
-  <h3>Reward Model &amp; Node Roles</h3>
+  <h3>Node Roles &amp; Registration</h3>
   <span class="arrow">&#9654;</span>
 </div>
 <div class="info-panel" id="infoPanel">
 
-  <h4>Tokenomics (SOLX)</h4>
+  <!-- Wallet Overview -->
+  <h4>Wallet</h4>
   <div class="info-grid">
-    <div class="info-row"><span class="info-key">Gas Token</span><span class="info-val">SOLX (6 Decimals)</span></div>
-    <div class="info-row"><span class="info-key">Initial Inflation</span><span class="info-val">8%</span></div>
-    <div class="info-row"><span class="info-key">Terminal Inflation</span><span class="info-val">1.5%</span></div>
-    <div class="info-row"><span class="info-key">Taper Rate</span><span class="info-val">15% / year</span></div>
-    <div class="info-row"><span class="info-key">Fee Burn</span><span class="info-val">50%</span></div>
-    <div class="info-row"><span class="info-key">Finality Period</span><span class="info-val">5 Slots</span></div>
-  </div>
-
-  <h4>Network Roles</h4>
-
-  <div class="role-card">
-    <div class="role-title">Attester</div>
-    <div>Attests state transitions on the DA layer. Invalid attestations can be slashed by challengers.</div>
-    <div class="info-grid" style="margin-top:6px">
-      <div class="info-row"><span class="info-key">Min. Bond</span><span class="info-val">1,000 SOLX</span></div>
-      <div class="info-row"><span class="info-key">Status</span><span class="info-val yellow" id="attesterStatus">Not yet active</span></div>
-    </div>
-  </div>
-
-  <div class="role-card">
-    <div class="role-title">Challenger</div>
-    <div>Can challenge invalid attestations and claim the attester's bond as reward.</div>
-    <div class="info-grid" style="margin-top:6px">
-      <div class="info-row"><span class="info-key">Min. Bond</span><span class="info-val">1,000 SOLX</span></div>
-      <div class="info-row"><span class="info-key">Status</span><span class="info-val yellow" id="challengerStatus">Not yet active</span></div>
-    </div>
-  </div>
-
-  <div class="role-card">
-    <div class="role-title">Prover (ZK)</div>
-    <div>Generates ZK proofs for state transitions. Penalized for invalid proofs.</div>
-    <div class="info-grid" style="margin-top:6px">
-      <div class="info-row"><span class="info-key">Min. Bond</span><span class="info-val">1,000 SOLX</span></div>
-      <div class="info-row"><span class="info-key">Proving Penalty</span><span class="info-val">10 SOLX</span></div>
-      <div class="info-row"><span class="info-key">Initial Prover Bond</span><span class="info-val">200,000 SOLX</span></div>
-    </div>
-  </div>
-
-  <div class="role-card">
-    <div class="role-title">Sequencer</div>
-    <div>Produces DA batches and orders transactions. The preferred sequencer additionally has soft-confirmation and leader election.</div>
-    <div class="info-grid" style="margin-top:6px">
-      <div class="info-row"><span class="info-key">Min. Bond (Standard)</span><span class="info-val">10,000 SOLX</span></div>
-      <div class="info-row"><span class="info-key">Preferred Seq. Bond</span><span class="info-val">20M SOLX</span></div>
-    </div>
-  </div>
-
-  <div class="role-card">
-    <div class="role-title">Operator Incentives</div>
-    <div>Reward distribution to a designated address for operating the rollup.</div>
-    <div class="info-grid" style="margin-top:6px">
-      <div class="info-row"><span class="info-key">Reward Address</span><span class="info-val mono" style="font-size:10px" id="infoOperatorAddr">-</span></div>
-    </div>
-  </div>
-
-  <h4>This Node's Wallet &amp; Bond Status</h4>
-  <div id="walletStatusBox">
-    <div class="info-grid">
-      <div class="info-row"><span class="info-key">Node Wallet</span><span class="info-val mono" style="font-size:10px" id="bondNodeWallet">-</span></div>
-      <div class="info-row"><span class="info-key">Config Wallet</span><span class="info-val mono" style="font-size:10px" id="bondConfigWallet">-</span></div>
-      <div class="info-row"><span class="info-key">Wallet Status</span><span class="info-val" id="bondWalletStatus">Checking...</span></div>
-    </div>
+    <div class="info-row"><span class="info-key">Node Wallet</span><span class="info-val mono" style="font-size:10px" id="bondNodeWallet">-</span></div>
+    <div class="info-row"><span class="info-key">Config Wallet</span><span class="info-val mono" style="font-size:10px" id="bondConfigWallet">-</span></div>
+    <div class="info-row"><span class="info-key">Wallet Status</span><span class="info-val" id="bondWalletStatus">Checking...</span></div>
+    <div class="info-row"><span class="info-key">SOLX Balance</span><span class="info-val mono" id="regBalance">-</span></div>
+    <div class="info-row"><span class="info-key">Celestia Address</span><span class="info-val mono" style="font-size:10px" id="regCelAddr">-</span></div>
+    <div class="info-row"><span class="info-key">Reward Address</span><span class="info-val mono" style="font-size:10px" id="infoOperatorAddr">-</span></div>
   </div>
 
   <div id="walletWarning" style="display:none; background:#3a2000; border:1px solid #ff9800; border-radius:6px; padding:12px; margin:10px 0">
     <div style="color:#ff9800; font-weight:600; margin-bottom:6px">&#9888; Wallet Mismatch — Resync Required</div>
     <div style="color:#ccc; font-size:13px; line-height:1.5">
-      Your config still uses the default team wallet. To receive prover/sequencer rewards,
-      your node wallet must be configured and the node data must be wiped so genesis is
-      re-imported with your wallet address.<br><br>
-      <strong>This will stop the node and delete all synced data.</strong>
-      The node will re-sync from scratch (this may take several hours).
+      Your config still uses the default team wallet. Apply your wallet and resync to receive rewards.
     </div>
     <div style="margin-top:10px; display:flex; gap:8px">
       <button class="btn btn-sm btn-danger" onclick="applyWalletResync()" id="btnResync">Apply Wallet &amp; Resync Now</button>
@@ -466,45 +407,93 @@ canvas.sparkline{vertical-align:middle}
     <div id="resyncResult" style="margin-top:8px; display:none"></div>
   </div>
 
-  <div id="walletOk" style="display:none; background:#0a2e0a; border:1px solid #4caf50; border-radius:6px; padding:12px; margin:10px 0">
-    <div style="color:#4caf50; font-weight:600">&#10003; Wallet configured correctly</div>
-    <div style="color:#aaa; font-size:12px; margin-top:4px">
-      Bond requirements: 10,000 SOLX (Sequencer) + 200,000 SOLX (Prover) = 210,000 SOLX total.
-      Ensure your wallet is funded on the rollup.
+  <div id="walletOk" style="display:none; background:#0a2e0a; border:1px solid #4caf50; border-radius:6px; padding:8px; margin:10px 0">
+    <span style="color:#4caf50; font-weight:600">&#10003; Wallet configured correctly</span>
+  </div>
+
+  <!-- Roles -->
+  <h4 style="margin-top:16px">Roles</h4>
+
+  <!-- Sequencer -->
+  <div class="role-card">
+    <div style="display:flex; justify-content:space-between; align-items:center">
+      <div class="role-title">Sequencer</div>
+      <span id="seqBadge" class="badge badge-warn" style="font-size:11px">-</span>
+    </div>
+    <div style="color:#8b949e; font-size:12px; margin:4px 0">Produces DA batches and orders transactions. Min bond: 10,000 SOLX.</div>
+    <div class="info-grid" style="margin-top:6px">
+      <div class="info-row"><span class="info-key">Status</span><span class="info-val" id="regSeqStatus">-</span></div>
+    </div>
+    <div id="seqPending" style="display:none; margin-top:8px; padding:8px; background:#2a2000; border:1px solid #ff9800; border-radius:4px; font-size:12px"></div>
+    <div id="seqActions" style="margin-top:8px; display:none">
+      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap">
+        <button class="btn btn-sm btn-primary" onclick="submitBond('sequencer')" id="btnBondSeq">Bond as Sequencer</button>
+        <button class="btn btn-sm btn-primary" onclick="submitDeposit('sequencer')" id="btnDepositSeq" style="display:none">Add Bond</button>
+        <button class="btn btn-sm btn-danger" onclick="submitUnbond('sequencer')" id="btnUnbondSeq" style="display:none">Initiate Withdrawal</button>
+      </div>
+      <div id="seqDepositInput" style="display:none; margin-top:6px">
+        <input type="number" id="seqDepositAmount" placeholder="Amount (SOLX)" style="width:140px; padding:4px 8px; border-radius:4px; border:1px solid #484f58; background:#161b22; color:#e6edf3; font-size:13px">
+        <button class="btn btn-sm btn-primary" onclick="confirmDeposit('sequencer')" style="margin-left:4px">Confirm</button>
+        <button class="btn btn-sm btn-secondary" onclick="document.getElementById('seqDepositInput').style.display='none'" style="margin-left:2px">Cancel</button>
+      </div>
     </div>
   </div>
 
-  <h4 style="margin-top:16px">On-Chain Registration</h4>
-  <div id="regStatusBox">
+  <!-- Prover -->
+  <div class="role-card">
+    <div style="display:flex; justify-content:space-between; align-items:center">
+      <div class="role-title">Prover (ZK)</div>
+      <span id="proverBadge" class="badge badge-warn" style="font-size:11px">-</span>
+    </div>
+    <div style="color:#8b949e; font-size:12px; margin:4px 0">Generates ZK proofs for state transitions. Min bond: 1,000 SOLX. Penalty: 10 SOLX per invalid proof.</div>
+    <div class="info-grid" style="margin-top:6px">
+      <div class="info-row"><span class="info-key">Status</span><span class="info-val" id="regProverStatus">-</span></div>
+    </div>
+    <div id="proverPending" style="display:none; margin-top:8px; padding:8px; background:#2a2000; border:1px solid #ff9800; border-radius:4px; font-size:12px"></div>
+    <div id="proverActions" style="margin-top:8px; display:none">
+      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap">
+        <button class="btn btn-sm btn-primary" onclick="submitBond('prover')" id="btnBondProver">Bond as Prover</button>
+        <button class="btn btn-sm btn-primary" onclick="submitDeposit('prover')" id="btnDepositProver" style="display:none">Add Bond</button>
+        <button class="btn btn-sm btn-danger" onclick="submitUnbond('prover')" id="btnUnbondProver" style="display:none">Initiate Withdrawal</button>
+      </div>
+      <div id="proverDepositInput" style="display:none; margin-top:6px">
+        <input type="number" id="proverDepositAmount" placeholder="Amount (SOLX)" style="width:140px; padding:4px 8px; border-radius:4px; border:1px solid #484f58; background:#161b22; color:#e6edf3; font-size:13px">
+        <button class="btn btn-sm btn-primary" onclick="confirmDeposit('prover')" style="margin-left:4px">Confirm</button>
+        <button class="btn btn-sm btn-secondary" onclick="document.getElementById('proverDepositInput').style.display='none'" style="margin-left:2px">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Attester / Challenger (not yet active) -->
+  <div class="role-card" style="opacity:0.5">
+    <div style="display:flex; justify-content:space-between; align-items:center">
+      <div class="role-title">Attester / Challenger</div>
+      <span class="badge badge-warn" style="font-size:11px">Coming Soon</span>
+    </div>
+    <div style="color:#8b949e; font-size:12px; margin:4px 0">Attests state transitions and challenges invalid attestations. Not yet open for external participants.</div>
+    <div class="info-grid" style="margin-top:6px">
+      <div class="info-row"><span class="info-key">Max. Attested Height</span><span class="info-val blue" id="infoMaxAttested">0</span></div>
+      <div class="info-row"><span class="info-key">Light Client Finalized</span><span class="info-val blue" id="infoLcFinalized">-</span></div>
+    </div>
+  </div>
+
+  <!-- Bond Action Result -->
+  <div id="bondResult" style="display:none; margin:10px 0; padding:10px; border-radius:6px; font-size:13px"></div>
+
+  <!-- TX History -->
+  <h4 style="margin-top:16px">Transaction History</h4>
+  <div id="txHistory" style="font-size:12px; color:#8b949e">No transactions yet.</div>
+
+  <!-- Tokenomics Reference -->
+  <h4 style="margin-top:16px; color:#8b949e; font-size:12px; cursor:pointer" onclick="document.getElementById('tokenomicsRef').style.display = document.getElementById('tokenomicsRef').style.display === 'none' ? 'block' : 'none'">Tokenomics Reference &#9660;</h4>
+  <div id="tokenomicsRef" style="display:none">
     <div class="info-grid">
-      <div class="info-row"><span class="info-key">SOLX Balance</span><span class="info-val mono" id="regBalance">-</span></div>
-      <div class="info-row"><span class="info-key">Celestia Address</span><span class="info-val mono" style="font-size:10px" id="regCelAddr">-</span></div>
-      <div class="info-row"><span class="info-key">Sovereign Account</span><span class="info-val" id="regSovAccount">-</span></div>
-      <div class="info-row"><span class="info-key">Sequencer</span><span class="info-val" id="regSeqStatus">-</span></div>
-      <div class="info-row"><span class="info-key">Prover</span><span class="info-val" id="regProverStatus">-</span></div>
+      <div class="info-row"><span class="info-key">Gas Token</span><span class="info-val">SOLX (6 Decimals)</span></div>
+      <div class="info-row"><span class="info-key">Initial Inflation</span><span class="info-val">8%</span></div>
+      <div class="info-row"><span class="info-key">Terminal Inflation</span><span class="info-val">1.5%</span></div>
+      <div class="info-row"><span class="info-key">Taper Rate</span><span class="info-val">15% / year</span></div>
+      <div class="info-row"><span class="info-key">Fee Burn</span><span class="info-val">50%</span></div>
     </div>
-  </div>
-  <div id="regActions" style="display:none; margin:10px 0">
-    <div style="display:flex; gap:8px; flex-wrap:wrap">
-      <button class="btn btn-sm btn-primary" onclick="simulateRegister('sequencer')" id="btnSimSeq">Check Sequencer Readiness</button>
-      <button class="btn btn-sm btn-primary" onclick="simulateRegister('prover')" id="btnSimProver">Check Prover Readiness</button>
-    </div>
-    <div id="regResult" style="margin-top:8px; display:none; padding:8px; border-radius:4px; font-size:13px"></div>
-  </div>
-
-  <h4 style="margin-top:16px">Attestation Status</h4>
-  <div class="info-grid">
-    <div class="info-row"><span class="info-key">Role</span><span class="info-val">Standard Sequencer (Full Node)</span></div>
-    <div class="info-row"><span class="info-key">Registered as Attester</span><span class="info-val red">No</span></div>
-    <div class="info-row"><span class="info-key">Registered as Prover</span><span class="info-val red">No</span></div>
-    <div class="info-row"><span class="info-key">Max. Attested Height</span><span class="info-val blue" id="infoMaxAttested">0</span></div>
-    <div class="info-row"><span class="info-key">Light Client Finalized</span><span class="info-val blue" id="infoLcFinalized">-</span></div>
-  </div>
-
-  <div class="info-note">
-    The attester/prover incentive system is implemented in the code but not yet open for external participants.
-    Currently only the preferred sequencer (Solaxy team) produces blocks. Registration is expected to be enabled in a later phase.
-    Until then: keep the node synced, ensure your wallet is configured, and wait.
   </div>
 </div>
 
@@ -786,14 +775,23 @@ function updateStats(data) {
     if (netReachable) { rpcEl.textContent = 'LIVE'; rpcEl.className = 'badge badge-ok'; }
     else { rpcEl.textContent = 'OFFLINE'; rpcEl.className = 'badge badge-err'; }
 
-    // Show sovereign slot from sync data (the real local progress)
+    // SVM Slots: local vs network (same type, directly comparable)
+    const localSlot = loc.slot;
+    document.getElementById('localSvmSlot').textContent = num(localSlot);
+    document.getElementById('netSlot').textContent = num(netSlot);
+    // Slot difference: shows how far behind the local node is
+    const diffEl = document.getElementById('slotDiff');
+    if (localSlot != null && netSlot != null) {
+      const diff = netSlot - localSlot;
+      diffEl.textContent = diff <= 0 ? '0' : '-' + num(diff);
+      diffEl.style.color = diff <= 3 ? '#3fb950' : diff <= 20 ? '#d29922' : '#f85149';
+    }
+    // Sovereign slot + DA batches in the secondary line
     if (sol.sync.slot_number) {
       document.getElementById('sovSlot').textContent = num(sol.sync.slot_number);
     }
-    document.getElementById('netSlot').textContent = num(netSlot);
     document.getElementById('netTxCount').textContent = num(net.tx_count);
     document.getElementById('netEpoch').textContent = net.epoch != null ? num(net.epoch) : '-';
-    document.getElementById('localSvmSlot').textContent = num(loc.slot);
   }
 
   // PostgreSQL
@@ -1256,89 +1254,231 @@ async function fetchRegistrationStatus() {
 
     const bal = document.getElementById('regBalance');
     const cel = document.getElementById('regCelAddr');
-    const sov = document.getElementById('regSovAccount');
     const seq = document.getElementById('regSeqStatus');
     const prv = document.getElementById('regProverStatus');
-    const actions = document.getElementById('regActions');
+    const seqBadge = document.getElementById('seqBadge');
+    const proverBadge = document.getElementById('proverBadge');
 
     if (bal) {
-      const amount = parseInt(d.gas_balance || '0', 10);
-      bal.textContent = amount.toLocaleString() + ' (raw units)';
+      const raw = parseInt(d.gas_balance || '0', 10);
+      const solx = (raw / 1e6).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 6});
+      bal.textContent = solx + ' SOLX';
     }
     if (cel) cel.textContent = d.celestia_address || 'Not found';
-    if (sov) {
-      sov.textContent = d.has_sovereign_account ? 'Active' : 'Not created';
-      sov.className = 'info-val ' + (d.has_sovereign_account ? 'green' : 'yellow');
-    }
+
+    // Helper: format raw SOLX units to human-readable
+    const fmtSolx = (raw) => (parseInt(raw || '0', 10) / 1e6).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 2});
+
+    // Sequencer
+    const seqRegistered = d.sequencer_registered;
     if (seq) {
-      if (d.sequencer_registered) {
-        seq.innerHTML = '<span class="green">Registered</span> (bond: ' + d.sequencer_bond + ')';
+      if (seqRegistered) {
+        seq.innerHTML = '<span class="green">Bonded</span> (' + fmtSolx(d.sequencer_bond) + ' SOLX)';
+        seqBadge.textContent = 'Active'; seqBadge.className = 'badge badge-ok';
+        document.getElementById('seqActions').style.display = 'block';
+        document.getElementById('btnBondSeq').style.display = 'none';
+        document.getElementById('btnDepositSeq').style.display = '';
+        document.getElementById('btnUnbondSeq').style.display = '';
+      } else if (getPendingBond('sequencer')) {
+        seq.innerHTML = '<span class="yellow">Pending...</span>';
+        seqBadge.textContent = 'Pending'; seqBadge.className = 'badge badge-warn';
+        document.getElementById('seqActions').style.display = 'block';
+        document.getElementById('btnBondSeq').style.display = 'none';
+        document.getElementById('btnUnbondSeq').style.display = 'none';
       } else {
-        seq.innerHTML = '<span class="red">Not registered</span> (min bond: ' + d.minimum_seq_bond + ')';
+        seq.innerHTML = '<span class="red">Not bonded</span> (min: ' + fmtSolx(d.minimum_seq_bond) + ' SOLX)';
+        seqBadge.textContent = 'Unbonded'; seqBadge.className = 'badge badge-warn';
+        document.getElementById('seqActions').style.display = 'block';
+        document.getElementById('btnBondSeq').style.display = '';
+        document.getElementById('btnUnbondSeq').style.display = 'none';
       }
     }
+    updatePendingDisplay('sequencer', seqRegistered);
+
+    // Prover
+    const proverRegistered = d.prover_registered;
     if (prv) {
-      if (d.prover_registered) {
-        prv.innerHTML = '<span class="green">Registered</span> (bond: ' + d.prover_bond + ')';
+      if (proverRegistered) {
+        prv.innerHTML = '<span class="green">Bonded</span> (' + fmtSolx(d.prover_bond) + ' SOLX)';
+        proverBadge.textContent = 'Active'; proverBadge.className = 'badge badge-ok';
+        document.getElementById('proverActions').style.display = 'block';
+        document.getElementById('btnBondProver').style.display = 'none';
+        document.getElementById('btnDepositProver').style.display = '';
+        document.getElementById('btnUnbondProver').style.display = '';
+      } else if (getPendingBond('prover')) {
+        prv.innerHTML = '<span class="yellow">Pending...</span>';
+        proverBadge.textContent = 'Pending'; proverBadge.className = 'badge badge-warn';
+        document.getElementById('proverActions').style.display = 'block';
+        document.getElementById('btnBondProver').style.display = 'none';
+        document.getElementById('btnUnbondProver').style.display = 'none';
       } else {
-        prv.innerHTML = '<span class="red">Not registered</span> (min bond: ' + d.minimum_prover_bond + ')';
+        prv.innerHTML = '<span class="red">Not bonded</span> (min: ' + fmtSolx(d.minimum_prover_bond) + ' SOLX)';
+        proverBadge.textContent = 'Unbonded'; proverBadge.className = 'badge badge-warn';
+        document.getElementById('proverActions').style.display = 'block';
+        document.getElementById('btnBondProver').style.display = '';
+        document.getElementById('btnUnbondProver').style.display = 'none';
       }
     }
-    // Show action buttons if not both registered
-    if (actions && (!d.sequencer_registered || !d.prover_registered)) {
-      actions.style.display = 'block';
-      document.getElementById('btnSimSeq').style.display = d.sequencer_registered ? 'none' : '';
-      document.getElementById('btnSimProver').style.display = d.prover_registered ? 'none' : '';
-    } else if (actions) {
-      actions.style.display = 'none';
-    }
+    updatePendingDisplay('prover', proverRegistered);
   } catch (e) { console.error('Registration status error:', e); }
 }
 
-async function simulateRegister(role) {
-  const btn = document.getElementById(role === 'sequencer' ? 'btnSimSeq' : 'btnSimProver');
-  const result = document.getElementById('regResult');
-  const oldText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Checking...';
-  result.style.display = 'block';
-  result.style.background = '#2a2a2a';
-  result.style.color = '#ff9800';
-  result.textContent = 'Running readiness check...';
+// Persistent bond TX storage
+function saveBondTx(role, txHash) {
+  const pending = JSON.parse(localStorage.getItem('pendingBonds') || '{}');
+  pending[role] = { tx: txHash, time: Date.now() };
+  localStorage.setItem('pendingBonds', JSON.stringify(pending));
+}
+function clearBondTx(role) {
+  const pending = JSON.parse(localStorage.getItem('pendingBonds') || '{}');
+  delete pending[role];
+  localStorage.setItem('pendingBonds', JSON.stringify(pending));
+}
+function getPendingBond(role) {
+  const pending = JSON.parse(localStorage.getItem('pendingBonds') || '{}');
+  return pending[role] || null;
+}
 
+// TX History (persisted in localStorage)
+function addTxHistory(role, action, txHash, status) {
+  const history = JSON.parse(localStorage.getItem('txHistory') || '[]');
+  history.unshift({ role, action, tx: txHash, status, time: Date.now() });
+  if (history.length > 50) history.length = 50;
+  localStorage.setItem('txHistory', JSON.stringify(history));
+  renderTxHistory();
+}
+function renderTxHistory() {
+  const el = document.getElementById('txHistory');
+  if (!el) return;
+  const history = JSON.parse(localStorage.getItem('txHistory') || '[]');
+  if (!history.length) { el.innerHTML = '<span style="color:#484f58">No transactions yet.</span>'; return; }
+  const labels = { register: 'Bond', deposit: 'Add Bond', withdraw: 'Withdrawal' };
+  el.innerHTML = '<table style="width:100%;border-collapse:collapse">' +
+    '<tr style="color:#484f58;font-size:11px;text-align:left"><th style="padding:3px 6px">Time</th><th style="padding:3px 6px">Role</th><th style="padding:3px 6px">Action</th><th style="padding:3px 6px">Status</th><th style="padding:3px 6px">TX Hash</th></tr>' +
+    history.map(h => {
+      const t = new Date(h.time);
+      const ts = t.toLocaleDateString() + ' ' + t.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      const color = h.status === 'success' ? '#3fb950' : h.status === 'failed' ? '#f85149' : '#d29922';
+      return '<tr style="border-top:1px solid #21262d">' +
+        '<td style="padding:4px 6px;color:#8b949e">' + ts + '</td>' +
+        '<td style="padding:4px 6px;text-transform:capitalize">' + (h.role || '-') + '</td>' +
+        '<td style="padding:4px 6px">' + (labels[h.action] || h.action || '-') + '</td>' +
+        '<td style="padding:4px 6px;color:' + color + '">' + (h.status || '-') + '</td>' +
+        '<td style="padding:4px 6px;font-family:monospace;font-size:10px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><a href="https://explorer.solaxy.io/tx/' + (h.tx||'') + '" target="_blank" style="color:#58a6ff;text-decoration:none">' + (h.tx ? h.tx.substring(0,16) + '...' : '-') + '</a></td></tr>';
+    }).join('') + '</table>';
+}
+
+function updatePendingDisplay(role, isRegistered) {
+  const pending = getPendingBond(role);
+  const el = document.getElementById(role === 'sequencer' ? 'seqPending' : 'proverPending');
+  if (!el) return;
+  if (isRegistered && pending) {
+    clearBondTx(role);
+    el.style.display = 'none';
+    return;
+  }
+  if (!pending) { el.style.display = 'none'; return; }
+  const ago = Math.round((Date.now() - pending.time) / 1000);
+  const agoStr = ago < 60 ? ago + 's ago' : Math.round(ago / 60) + 'min ago';
+  el.style.display = 'block';
+  el.innerHTML = '<span style="color:#ff9800">&#9203; Waiting for on-chain confirmation...</span>' +
+    '<div class="mono" style="font-size:10px;color:#8b949e;margin-top:3px">TX: ' + pending.tx + '</div>' +
+    '<div style="font-size:11px;color:#484f58;margin-top:2px">Submitted ' + agoStr + '</div>';
+}
+
+async function submitBond(role) {
+  const btn = document.getElementById(role === 'sequencer' ? 'btnBondSeq' : 'btnBondProver');
+  const result = document.getElementById('bondResult');
+  if (!confirm('Bond as ' + role + '? This will lock SOLX tokens as collateral.')) return;
+  btn.disabled = true; btn.textContent = 'Submitting...';
+  result.style.display = 'block'; result.style.background = '#2a2a2a'; result.style.color = '#ff9800';
+  result.textContent = 'Building and submitting transaction...';
   try {
-    const r = await fetch('/api/simulate-register', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+    const r = await fetch('/api/submit-register', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({role: role}),
     });
     const d = await r.json();
-    if (d.ok) {
-      const outcome = d.result?.outcome || 'unknown';
-      const gasUsed = d.result?.gas_used || '?';
-      if (outcome === 'reverted') {
-        const detail = d.result?.detail?.message || 'Unknown error';
-        result.style.background = '#3a1010';
-        result.style.color = '#f44336';
-        result.innerHTML = '<b>Not ready:</b> ' + detail;
-      } else {
-        result.style.background = '#0a2e0a';
-        result.style.color = '#4caf50';
-        result.innerHTML = '<b>Ready!</b> Your wallet meets all requirements for ' + role + ' registration (gas estimate: ' + gasUsed + '). ' +
-          '<span style="color:#aaa;font-size:12px">On-chain submission will be available once the Solaxy team enables sovereign transaction submission via RPC.</span>';
-      }
+    if (d.ok && d.phase === 'submitted') {
+      const txHash = d.tx_hash || '';
+      saveBondTx(role, txHash);
+      addTxHistory(role, 'register', txHash, 'success');
+      result.style.background = '#0a2e0a'; result.style.color = '#4caf50';
+      result.innerHTML = '<b>Transaction submitted!</b> Waiting for on-chain confirmation...';
+      updatePendingDisplay(role, false);
+      fetchRegistrationStatus();
     } else {
-      result.style.background = '#3a1010';
-      result.style.color = '#f44336';
-      result.innerHTML = '<b>Error:</b> ' + (d.error || 'Unknown error');
+      addTxHistory(role, 'register', '', 'failed');
+      result.style.background = '#3a1010'; result.style.color = '#f44336';
+      result.innerHTML = '<b>Failed:</b> ' + (d.error || 'Unknown error');
     }
   } catch (e) {
-    result.style.background = '#3a1010';
-    result.style.color = '#f44336';
+    result.style.background = '#3a1010'; result.style.color = '#f44336';
     result.textContent = 'Request failed: ' + e.message;
   }
-  btn.disabled = false;
-  btn.textContent = oldText;
+  btn.disabled = false; btn.textContent = role === 'sequencer' ? 'Bond as Sequencer' : 'Bond as Prover';
+}
+
+function submitDeposit(role) {
+  document.getElementById(role === 'sequencer' ? 'seqDepositInput' : 'proverDepositInput').style.display = 'block';
+}
+
+async function confirmDeposit(role) {
+  const inputId = role === 'sequencer' ? 'seqDepositAmount' : 'proverDepositAmount';
+  const val = parseFloat(document.getElementById(inputId).value);
+  if (!val || val <= 0) { alert('Enter a valid amount'); return; }
+  const rawAmount = Math.round(val * 1e6);
+  const result = document.getElementById('bondResult');
+  result.style.display = 'block'; result.style.background = '#2a2a2a'; result.style.color = '#ff9800';
+  result.textContent = 'Depositing ' + val + ' SOLX...';
+  try {
+    const r = await fetch('/api/submit-register', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({role: role, amount: String(rawAmount), action: 'deposit'}),
+    });
+    const d = await r.json();
+    if (d.ok && d.phase === 'submitted') {
+      addTxHistory(role, 'deposit', d.tx_hash || '', 'success');
+      result.style.background = '#0a2e0a'; result.style.color = '#4caf50';
+      result.innerHTML = '<b>Deposit submitted!</b> TX: <span class="mono" style="font-size:11px">' + (d.tx_hash || '') + '</span>';
+      document.getElementById(role === 'sequencer' ? 'seqDepositInput' : 'proverDepositInput').style.display = 'none';
+      fetchRegistrationStatus();
+    } else {
+      addTxHistory(role, 'deposit', '', 'failed');
+      result.style.background = '#3a1010'; result.style.color = '#f44336';
+      result.innerHTML = '<b>Failed:</b> ' + (d.error || 'Unknown error');
+    }
+  } catch (e) {
+    result.style.background = '#3a1010'; result.style.color = '#f44336';
+    result.textContent = 'Request failed: ' + e.message;
+  }
+}
+
+async function submitUnbond(role) {
+  const result = document.getElementById('bondResult');
+  if (!confirm('Initiate withdrawal for ' + role + '? This starts a cooldown period before you can withdraw your bond.')) return;
+  result.style.display = 'block'; result.style.background = '#2a2a2a'; result.style.color = '#ff9800';
+  result.textContent = 'Submitting withdrawal request...';
+  try {
+    const r = await fetch('/api/submit-register', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({role: role, action: 'withdraw'}),
+    });
+    const d = await r.json();
+    if (d.ok && d.phase === 'submitted') {
+      addTxHistory(role, 'withdraw', d.tx_hash || '', 'success');
+      result.style.background = '#0a2e0a'; result.style.color = '#4caf50';
+      result.innerHTML = '<b>Withdrawal initiated!</b> TX: <span class="mono" style="font-size:11px">' + (d.tx_hash || '') + '</span>';
+      fetchRegistrationStatus();
+    } else {
+      addTxHistory(role, 'withdraw', '', 'failed');
+      result.style.background = '#3a1010'; result.style.color = '#f44336';
+      result.innerHTML = '<b>Failed:</b> ' + (d.error || 'Unknown error');
+    }
+  } catch (e) {
+    result.style.background = '#3a1010'; result.style.color = '#f44336';
+    result.textContent = 'Request failed: ' + e.message;
+  }
 }
 
 async function loadConfig() {
@@ -1780,6 +1920,10 @@ fetchMetricsHistory();
 loadMapStatus();
 fetchWalletStatus();
 fetchRegistrationStatus();
+renderTxHistory();
+fetch('/api/version').then(r=>r.json()).then(d=>{
+  document.getElementById('versionBadge').textContent = 'v' + d.version;
+}).catch(()=>{});
 
 // Auto-refresh
 setInterval(fetchStats, 5000);
