@@ -2223,13 +2223,13 @@ def api_registration_status():
         except Exception:
             pass
 
-    # Check sovereign account exists
+    # Check sovereign account exists (keyed by raw pubkey hex)
     if wallet:
-        cred = _get_credential_id(wallet)
-        if cred:
+        pubhex = _get_pubkey_hex(wallet)
+        if pubhex:
             try:
                 r = requests.get(
-                    f"{rest}/modules/accounts/state/accounts/items/{cred}",
+                    f"{rest}/modules/accounts/state/accounts/items/{pubhex}",
                     timeout=5,
                 )
                 result["has_sovereign_account"] = r.status_code == 200
