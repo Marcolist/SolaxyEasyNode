@@ -708,6 +708,12 @@ else
         log "Migrated config.toml to match new binary defaults."
     fi
 
+    # Replace any leftover %%WALLET_ADDRESS%% placeholders from failed first installs
+    if [[ -n "$WALLET_ADDRESS" ]] && grep -q '%%WALLET_ADDRESS%%' "$USER_HOME/svm-rollup/config.toml" 2>/dev/null; then
+        sed -i "s|%%WALLET_ADDRESS%%|${WALLET_ADDRESS}|g" "$USER_HOME/svm-rollup/config.toml"
+        log "Replaced wallet placeholder in config.toml with: $WALLET_ADDRESS"
+    fi
+
     # Update wallet addresses if they still point to the default team wallet
     SOLAXY_TEAM_WALLET="HjjEhif8MU9DtnXtZc5hkBu9XLAkAYe1qwzhDoxbcECv"
     if [[ -n "$WALLET_ADDRESS" && "$WALLET_ADDRESS" != "$SOLAXY_TEAM_WALLET" ]]; then
