@@ -582,18 +582,13 @@ signer_private_key = "%%SIGNER_PRIVATE_KEY%%"
 
 [storage]
 path = "data"
-pruner_versions_to_keep = 50
-user_commit_concurrency = 8
-kernel_commit_concurrency = 4
+pruner_versions_to_keep = 100
+user_commit_concurrency = 4
+kernel_commit_concurrency = 2
 user_hashtable_buckets = 16000000
-user_page_cache_size = 4096
-kernel_page_cache_size = 1024
 
 [runner]
-da_polling_interval_ms = 50
-concurrent_sync_tasks = 20
-pre_fetched_blocks_capacity = 100
-save_tx_bodies = true
+da_polling_interval_ms = 200
 
 [runner.http_config]
 bind_host = "127.0.0.1"
@@ -641,6 +636,51 @@ else
             log "Updating rpc_auth_token in config.toml (Celestia store changed)..."
             sed -i "s|rpc_auth_token = \".*\"|rpc_auth_token = \"${CELESTIA_AUTH_TOKEN}\"|" "$USER_HOME/svm-rollup/config.toml"
         fi
+    fi
+
+    # ---- Config migration for binary update (Mar 2026) ----
+    # The new binary changed several config defaults. Migrate old values
+    # to avoid performance issues or deprecation warnings.
+    CFG="$USER_HOME/svm-rollup/config.toml"
+    CONFIG_MIGRATED=false
+
+    # Storage: pruner 50→100, concurrency 8/4→4/2, remove page_cache_size
+    if grep -q 'pruner_versions_to_keep = 50' "$CFG" 2>/dev/null; then
+        sed -i 's|pruner_versions_to_keep = 50|pruner_versions_to_keep = 100|' "$CFG"
+        CONFIG_MIGRATED=true
+    fi
+    if grep -q 'user_commit_concurrency = 8' "$CFG" 2>/dev/null; then
+        sed -i 's|user_commit_concurrency = 8|user_commit_concurrency = 4|' "$CFG"
+        CONFIG_MIGRATED=true
+    fi
+    if grep -q 'kernel_commit_concurrency = 4' "$CFG" 2>/dev/null; then
+        sed -i 's|kernel_commit_concurrency = 4|kernel_commit_concurrency = 2|' "$CFG"
+        CONFIG_MIGRATED=true
+    fi
+    # Remove deprecated page_cache_size settings
+    if grep -q 'user_page_cache_size' "$CFG" 2>/dev/null; then
+        sed -i '/user_page_cache_size/d' "$CFG"
+        CONFIG_MIGRATED=true
+    fi
+    if grep -q 'kernel_page_cache_size' "$CFG" 2>/dev/null; then
+        sed -i '/kernel_page_cache_size/d' "$CFG"
+        CONFIG_MIGRATED=true
+    fi
+
+    # Runner: polling 50→200, remove deprecated keys
+    if grep -q 'da_polling_interval_ms = 50' "$CFG" 2>/dev/null; then
+        sed -i 's|da_polling_interval_ms = 50|da_polling_interval_ms = 200|' "$CFG"
+        CONFIG_MIGRATED=true
+    fi
+    for key in concurrent_sync_tasks pre_fetched_blocks_capacity save_tx_bodies; do
+        if grep -q "$key" "$CFG" 2>/dev/null; then
+            sed -i "/${key}/d" "$CFG"
+            CONFIG_MIGRATED=true
+        fi
+    done
+
+    if $CONFIG_MIGRATED; then
+        log "Migrated config.toml to match new binary defaults."
     fi
 
     # Update wallet addresses if they still point to the default team wallet

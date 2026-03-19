@@ -1085,7 +1085,7 @@ def _rpc_call(url, method, params=None, timeout=5):
         return None
 
 
-LOCAL_RPC = "http://127.0.0.1:8080"
+LOCAL_RPC = "http://127.0.0.1:8080/rpc"
 
 # Block / DA processing rate measurement
 _block_stats = {
@@ -1274,7 +1274,7 @@ def prometheus_stats():
         return {}
 
 
-PUBLIC_RPC = "https://mainnet.rpc.solaxy.io"
+PUBLIC_RPC = "https://mainnet.rpc.solaxy.io/rpc"
 SOLX_WALLET_PATH = os.path.expanduser("~/svm-rollup/node-wallet.json")
 
 
@@ -1955,6 +1955,16 @@ def _get_credential_id(address):
         return ""
 
 
+def _get_pubkey_hex(address):
+    """Get the raw 32-byte public key as hex string (for /rollup/simulate sender)."""
+    try:
+        import base58
+        pubkey_bytes = base58.b58decode(address)
+        return pubkey_bytes.hex()
+    except Exception:
+        return ""
+
+
 @app.route("/api/registration-status")
 def api_registration_status():
     """Check sequencer and prover on-chain registration status."""
@@ -2060,9 +2070,9 @@ def api_simulate_register():
     if not wallet:
         return jsonify({"error": "Node wallet not found"}), 400
 
-    cred = _get_credential_id(wallet)
-    if not cred:
-        return jsonify({"error": "Could not compute credential ID"}), 400
+    pubkey_hex = _get_pubkey_hex(wallet)
+    if not pubkey_hex:
+        return jsonify({"error": "Could not derive public key hex"}), 400
 
     if role == "sequencer":
         cel_addr = _get_celestia_address()
@@ -2090,7 +2100,7 @@ def api_simulate_register():
         return jsonify({"error": f"Unknown role: {role}"}), 400
 
     payload = {
-        "sender": cred,
+        "sender": pubkey_hex,
         "call": call_body,
     }
 
@@ -2131,10 +2141,10 @@ def api_submit_register():
 
     cel_addr = _get_celestia_address()
 
-    # First, simulate to verify the call would succeed
-    cred = _get_credential_id(wallet)
-    if not cred:
-        return jsonify({"error": "Could not compute credential ID"}), 400
+    # Get raw pubkey hex for simulate sender
+    pubkey_hex = _get_pubkey_hex(wallet)
+    if not pubkey_hex:
+        return jsonify({"error": "Could not derive public key hex"}), 400
 
     if role == "sequencer":
         if not cel_addr:
@@ -2164,7 +2174,7 @@ def api_submit_register():
     try:
         sim_resp = requests.post(
             f"{ROLLUP_REST}/rollup/simulate",
-            json={"sender": cred, "call": call_body},
+            json={"sender": pubkey_hex, "call": call_body},
             timeout=15,
         )
         if sim_resp.status_code == 200:
@@ -2189,21 +2199,22 @@ def api_submit_register():
             "phase": "simulate",
         })
 
-    # NOTE: Actual transaction submission requires building a sovereign-sdk
-    # FullyBakedTx and submitting via /sequencer/txs or sendTransaction.
-    # The transaction encoding is binary (Borsh-serialized RuntimeCall wrapped
-    # in a Solana VersionedTransaction).
-    #
-    # For now, we return the simulate success and instruct the user that
-    # registration requires the active sequencer to batch the transaction.
+    # Sovereign module calls (sequencer_registry, prover_incentives) require
+    # the sovereign-sdk transaction format (Borsh-serialized RuntimeCall), which
+    # cannot be submitted via the standard Solana sendTransaction RPC.
+    # The /sequencer/txs REST endpoint accepts this format, but the public RPC
+    # only exposes JSON-RPC. Registration will be possible once the Solaxy team
+    # adds a JSON-RPC method for sovereign module transactions.
     return jsonify({
         "ok": True,
         "phase": "simulated",
         "message": (
-            f"Simulation succeeded for {role} registration. "
-            "On-chain submission requires the active sequencer to batch the "
-            "transaction. This feature will be available once the Solaxy team "
-            "publishes a transaction SDK."
+            f"Simulation succeeded for {role} registration — your wallet has "
+            "sufficient balance and meets all requirements. On-chain submission "
+            "is not yet available: sovereign module calls require a transaction "
+            "format that the current RPC does not expose. This will be enabled "
+            "once the Solaxy team adds support for sovereign transaction "
+            "submission via JSON-RPC."
         ),
         "simulate_result": sim_result if sim_resp.status_code == 200 else None,
     })

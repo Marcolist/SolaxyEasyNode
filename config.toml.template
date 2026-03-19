@@ -1,7 +1,9 @@
 [da]
 # ============================================================================
 # IMPORTANT: Configure these values for your deployment.
-# Alternatively, set the corresponding environment variables instead.
+# Alternatively, set the corresponding environment variables instead:
+#   SOV_CELESTIA_RPC_URL, SOV_CELESTIA_RPC_AUTH_TOKEN,
+#   SOV_CELESTIA_GRPC_URL, SOV_CELESTIA_SIGNER_PRIVATE_KEY
 # ============================================================================
 
 # The address of the Celestia RPC server to interact with.
@@ -21,18 +23,13 @@ signer_private_key = "%%SIGNER_PRIVATE_KEY%%"
 path = "data"
 
 # NOMT settings
-pruner_versions_to_keep = 50
-user_commit_concurrency = 8
-kernel_commit_concurrency = 4
+pruner_versions_to_keep = 100
+user_commit_concurrency = 4
+kernel_commit_concurrency = 2
 user_hashtable_buckets = 16000000
-user_page_cache_size = 4096
-kernel_page_cache_size = 1024
 
 [runner]
-da_polling_interval_ms = 50
-concurrent_sync_tasks = 20
-pre_fetched_blocks_capacity = 100
-save_tx_bodies = true
+da_polling_interval_ms = 200
 
 [runner.http_config]
 bind_host = "127.0.0.1"

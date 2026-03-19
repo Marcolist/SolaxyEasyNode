@@ -97,20 +97,20 @@ To participate as a sequencer or prover, the wallet must be funded **on the Sola
 
 Having a funded wallet is not enough — you must **register on-chain** as a sequencer and/or prover. The node does NOT register automatically.
 
-**Registration flow:**
+> **Current status:** On-chain registration requires sovereign module transactions, which the Solaxy RPC does not yet expose. The current sequencer was registered at genesis. Once the Solaxy team enables sovereign transaction submission via JSON-RPC, registration will be possible from the dashboard. In the meantime, use the **Readiness Check** to verify your wallet meets all requirements.
+
+**Registration requirements:**
 
 1. **Fund your wallet** — your node wallet must hold enough SOLX (on the Solaxy rollup, not Solana mainnet)
-2. **Create a sovereign account** — submit any Solana-compatible transaction (e.g. a self-transfer) through your node to create the credential mapping
-3. **Register as sequencer** — submit a `sequencer_registry::register` call with your Celestia DA address and bond amount
-4. **Register as prover** (optional) — submit a `prover_incentives::register` call with your bond amount
+2. **Register as sequencer** — requires a `sequencer_registry::register` sovereign module call with your Celestia DA address and bond amount (min 10,000 SOLX)
+3. **Register as prover** (optional) — requires a `prover_incentives::register` sovereign module call with bond amount (min 200,000 SOLX)
 
 **Using the Dashboard:**
 
 Open `http://<your-ip>:5555` and navigate to the **Registration** panel. The dashboard shows:
 - Current registration status (sequencer / prover)
 - SOLX balance and minimum bond requirements
-- Simulate button to test if registration would succeed
-- Submit button to send the registration transaction
+- **Readiness Check** — simulates registration to verify your wallet has sufficient balance and meets all requirements
 
 **REST API (for advanced users):**
 
@@ -128,11 +128,11 @@ curl http://127.0.0.1:8899/modules/bank/tokens/gas_token/balances/<wallet_addres
 curl http://127.0.0.1:8899/modules/sequencer-registry/state/minimum-bond
 curl http://127.0.0.1:8899/modules/prover-incentives/state/minimum-bond
 
-# Simulate sequencer registration
+# Simulate sequencer registration (readiness check)
 curl -X POST http://127.0.0.1:8899/rollup/simulate \
   -H "Content-Type: application/json" \
   -d '{
-    "sender": "<sha256_of_pubkey_hex>",
+    "sender": "<raw_pubkey_hex_32bytes>",
     "call": {
       "sequencer_registry": {
         "register": {
@@ -143,11 +143,11 @@ curl -X POST http://127.0.0.1:8899/rollup/simulate \
     }
   }'
 
-# Simulate prover registration
+# Simulate prover registration (readiness check)
 curl -X POST http://127.0.0.1:8899/rollup/simulate \
   -H "Content-Type: application/json" \
   -d '{
-    "sender": "<sha256_of_pubkey_hex>",
+    "sender": "<raw_pubkey_hex_32bytes>",
     "call": {
       "prover_incentives": {
         "register": "200000"
@@ -156,7 +156,7 @@ curl -X POST http://127.0.0.1:8899/rollup/simulate \
   }'
 ```
 
-> **Note:** The `sender` field in the simulate API is the SHA256 hash of your wallet's public key bytes (hex-encoded), not the base58 address. The dashboard handles this automatically.
+> **Note:** The `sender` field in the simulate API is the hex-encoded raw 32-byte public key (not base58, not SHA256). The dashboard handles this automatically. You can derive it with: `python3 -c "import base58; print(base58.b58decode('<your_address>').hex())"`
 
 ### Wallet Setup (New Install)
 

@@ -486,8 +486,8 @@ canvas.sparkline{vertical-align:middle}
   </div>
   <div id="regActions" style="display:none; margin:10px 0">
     <div style="display:flex; gap:8px; flex-wrap:wrap">
-      <button class="btn btn-sm btn-primary" onclick="simulateRegister('sequencer')" id="btnSimSeq">Simulate Sequencer Registration</button>
-      <button class="btn btn-sm btn-primary" onclick="simulateRegister('prover')" id="btnSimProver">Simulate Prover Registration</button>
+      <button class="btn btn-sm btn-primary" onclick="simulateRegister('sequencer')" id="btnSimSeq">Check Sequencer Readiness</button>
+      <button class="btn btn-sm btn-primary" onclick="simulateRegister('prover')" id="btnSimProver">Check Prover Readiness</button>
     </div>
     <div id="regResult" style="margin-top:8px; display:none; padding:8px; border-radius:4px; font-size:13px"></div>
   </div>
@@ -1300,11 +1300,11 @@ async function simulateRegister(role) {
   const result = document.getElementById('regResult');
   const oldText = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Simulating...';
+  btn.textContent = 'Checking...';
   result.style.display = 'block';
   result.style.background = '#2a2a2a';
   result.style.color = '#ff9800';
-  result.textContent = 'Running simulation...';
+  result.textContent = 'Running readiness check...';
 
   try {
     const r = await fetch('/api/simulate-register', {
@@ -1315,20 +1315,22 @@ async function simulateRegister(role) {
     const d = await r.json();
     if (d.ok) {
       const outcome = d.result?.outcome || 'unknown';
+      const gasUsed = d.result?.gas_used || '?';
       if (outcome === 'reverted') {
         const detail = d.result?.detail?.message || 'Unknown error';
         result.style.background = '#3a1010';
         result.style.color = '#f44336';
-        result.textContent = 'Simulation reverted: ' + detail;
+        result.innerHTML = '<b>Not ready:</b> ' + detail;
       } else {
         result.style.background = '#0a2e0a';
         result.style.color = '#4caf50';
-        result.textContent = 'Simulation succeeded! Registration would be accepted. Submission requires the active sequencer to batch the transaction.';
+        result.innerHTML = '<b>Ready!</b> Your wallet meets all requirements for ' + role + ' registration (gas estimate: ' + gasUsed + '). ' +
+          '<span style="color:#aaa;font-size:12px">On-chain submission will be available once the Solaxy team enables sovereign transaction submission via RPC.</span>';
       }
     } else {
       result.style.background = '#3a1010';
       result.style.color = '#f44336';
-      result.textContent = 'Error: ' + (d.error || 'Unknown error');
+      result.innerHTML = '<b>Error:</b> ' + (d.error || 'Unknown error');
     }
   } catch (e) {
     result.style.background = '#3a1010';
