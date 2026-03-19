@@ -2,7 +2,7 @@
 
 One-line installer for a complete Solaxy node: **SVM Rollup + Celestia Bridge Node + PostgreSQL + Web Dashboard**.
 
-<img src="screenshots/easynode.png" alt="SolaxyEasyNode" width="400">
+![SolaxyEasyNode](screenshots/easynode.png)
 
 ## Quick Install
 
