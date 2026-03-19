@@ -220,13 +220,14 @@ def _get_node_stats_for_map():
         configured_wallet = cfg.get("proof_manager", {}).get("prover_address", "")
 
         if configured_wallet and configured_wallet != SOLAXY_TEAM_WALLET:
-            # Check actual on-chain registration via REST API
+            # Check actual on-chain registration via mainnet REST API
+            MAINNET_REST = "https://mainnet.rpc.solaxy.io"
             try:
                 cel_addr = _get_celestia_address()
                 if cel_addr:
                     r = requests.get(
-                        f"http://127.0.0.1:8899/modules/sequencer-registry/state/known-sequencers/items/{cel_addr}",
-                        timeout=3,
+                        f"{MAINNET_REST}/modules/sequencer-registry/state/known-sequencers/items/{cel_addr}",
+                        timeout=5,
                     )
                     if r.status_code == 200:
                         roles.append("sequencer")
@@ -234,8 +235,8 @@ def _get_node_stats_for_map():
                 pass
             try:
                 r = requests.get(
-                    f"http://127.0.0.1:8899/modules/prover-incentives/state/bonded-provers/items/{configured_wallet}",
-                    timeout=3,
+                    f"{MAINNET_REST}/modules/prover-incentives/state/bonded-provers/items/{configured_wallet}",
+                    timeout=5,
                 )
                 if r.status_code == 200:
                     roles.append("prover")
