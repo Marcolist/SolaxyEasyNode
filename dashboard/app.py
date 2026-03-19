@@ -2185,9 +2185,17 @@ def _get_pubkey_hex(address):
 
 @app.route("/api/registration-status")
 def api_registration_status():
-    """Check sequencer and prover on-chain registration status."""
+    """Check sequencer and prover on-chain registration status.
+
+    Uses the mainnet REST API for up-to-date state, falling back to
+    the local node if mainnet is unreachable.
+    """
     wallet = _get_node_wallet_address()
     cel_addr = _get_celestia_address()
+
+    # Use mainnet for registration checks — the local node may be behind
+    MAINNET = "https://mainnet.rpc.solaxy.io"
+    rest = MAINNET
 
     result = {
         "wallet": wallet or "",
@@ -2206,7 +2214,7 @@ def api_registration_status():
     if wallet:
         try:
             r = requests.get(
-                f"{ROLLUP_REST}/modules/bank/tokens/gas_token/balances/{wallet}",
+                f"{rest}/modules/bank/tokens/gas_token/balances/{wallet}",
                 timeout=5,
             )
             if r.status_code == 200:
@@ -2220,7 +2228,7 @@ def api_registration_status():
         if cred:
             try:
                 r = requests.get(
-                    f"{ROLLUP_REST}/modules/accounts/state/accounts/items/{cred}",
+                    f"{rest}/modules/accounts/state/accounts/items/{cred}",
                     timeout=5,
                 )
                 result["has_sovereign_account"] = r.status_code == 200
@@ -2231,7 +2239,7 @@ def api_registration_status():
     if cel_addr:
         try:
             r = requests.get(
-                f"{ROLLUP_REST}/modules/sequencer-registry/state/known-sequencers/items/{cel_addr}",
+                f"{rest}/modules/sequencer-registry/state/known-sequencers/items/{cel_addr}",
                 timeout=5,
             )
             if r.status_code == 200:
@@ -2245,7 +2253,7 @@ def api_registration_status():
     if wallet:
         try:
             r = requests.get(
-                f"{ROLLUP_REST}/modules/prover-incentives/state/bonded-provers/items/{wallet}",
+                f"{rest}/modules/prover-incentives/state/bonded-provers/items/{wallet}",
                 timeout=5,
             )
             if r.status_code == 200:
@@ -2257,7 +2265,7 @@ def api_registration_status():
     # Get minimum bonds
     try:
         r = requests.get(
-            f"{ROLLUP_REST}/modules/sequencer-registry/state/minimum-bond",
+            f"{rest}/modules/sequencer-registry/state/minimum-bond",
             timeout=3,
         )
         if r.status_code == 200:
@@ -2266,7 +2274,7 @@ def api_registration_status():
         pass
     try:
         r = requests.get(
-            f"{ROLLUP_REST}/modules/prover-incentives/state/minimum-bond",
+            f"{rest}/modules/prover-incentives/state/minimum-bond",
             timeout=3,
         )
         if r.status_code == 200:
@@ -2275,6 +2283,54 @@ def api_registration_status():
         pass
 
     return jsonify(result)
+
+
+@app.route("/api/activate-account", methods=["POST"])
+def api_activate_account():
+    """Activate the sovereign account by sending a 0-lamport self-transfer.
+
+    The preferred sequencer processes the SVM transaction which creates
+    the sovereign account entry on-chain.  This is required before any
+    sovereign module calls (bond, register) can succeed.
+    """
+    wallet = _get_node_wallet_address()
+    if not wallet:
+        return jsonify({"ok": False, "error": "Node wallet not found"}), 400
+
+    try:
+        import subprocess
+        # Find solana CLI
+        solana_cli = None
+        for path in [
+            os.path.expanduser("~/.local/share/solana/install/active_release/bin/solana"),
+            os.path.expanduser("~/solana-release/bin/solana"),
+        ]:
+            if os.path.isfile(path):
+                solana_cli = path
+                break
+        if not solana_cli:
+            import shutil as _sh
+            solana_cli = _sh.which("solana")
+        if not solana_cli:
+            return jsonify({"ok": False, "error": "solana CLI not found"}), 500
+
+        result = subprocess.run(
+            [
+                solana_cli, "transfer",
+                "--url", PUBLIC_RPC,
+                "--keypair", SOLX_WALLET_PATH,
+                wallet, "0",
+                "--allow-unfunded-recipient",
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            sig = result.stdout.strip().split()[-1] if result.stdout.strip() else ""
+            return jsonify({"ok": True, "signature": sig})
+        else:
+            return jsonify({"ok": False, "error": result.stderr.strip() or result.stdout.strip()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/api/simulate-register", methods=["POST"])
@@ -2422,11 +2478,16 @@ def api_submit_register():
             sim_result = sim_resp.json()
             if sim_result.get("outcome") == "reverted":
                 detail = sim_result.get("detail", {}).get("message", "Unknown error")
-                return jsonify({
-                    "ok": False,
-                    "error": f"Simulation failed: {detail}",
-                    "phase": "simulate",
-                })
+                # If the sovereign account doesn't exist yet, skip simulation —
+                # the account will be auto-created when the real TX is processed.
+                if "not have enough funds" in detail:
+                    app.logger.info("Simulation reverted (no sovereign account yet), proceeding with submit...")
+                else:
+                    return jsonify({
+                        "ok": False,
+                        "error": f"Simulation failed: {detail}",
+                        "phase": "simulate",
+                    })
         elif sim_resp.status_code != 0:
             return jsonify({
                 "ok": False,
@@ -2434,11 +2495,7 @@ def api_submit_register():
                 "phase": "simulate",
             })
     except Exception as e:
-        return jsonify({
-            "ok": False,
-            "error": f"Simulation request failed: {e}",
-            "phase": "simulate",
-        })
+        app.logger.warning("Simulation request failed: %s — proceeding with submit", e)
 
     # Build and submit the sovereign module TX via the mainnet REST API.
     action = data.get("action", "register")

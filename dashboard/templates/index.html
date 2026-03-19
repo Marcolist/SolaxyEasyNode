@@ -188,6 +188,7 @@ canvas.sparkline{vertical-align:middle}
     </div>
     <div class="stat-grid">
       <div class="stat"><span class="stat-label">Slot</span><span class="stat-value" id="solSlot">-</span></div>
+      <div class="stat"><span class="stat-label">Slot Diff</span><span class="stat-value" id="solSlotDiff">-</span></div>
       <div class="stat"><span class="stat-label">Block Time</span><span class="stat-value" id="solBlockTime">-</span></div>
       <div class="stat">
         <span class="stat-label">DA Blocks/sec</span>
@@ -409,6 +410,24 @@ canvas.sparkline{vertical-align:middle}
 
   <div id="walletOk" style="display:none; background:#0a2e0a; border:1px solid #4caf50; border-radius:6px; padding:8px; margin:10px 0">
     <span style="color:#4caf50; font-weight:600">&#10003; Wallet configured correctly</span>
+  </div>
+
+  <!-- Account Activation -->
+  <div id="accountActivation" style="display:none; background:#1a1a2e; border:1px solid #58a6ff; border-radius:6px; padding:12px; margin:10px 0">
+    <div style="color:#58a6ff; font-weight:600; margin-bottom:6px">&#9432; Account Activation Required</div>
+    <div style="color:#ccc; font-size:13px; line-height:1.5">
+      Your wallet has SOLX balance but no sovereign account on-chain yet.
+      A sovereign account is required before you can bond as sequencer or prover.
+      This sends a 0-lamport self-transfer via the mainnet sequencer to activate your account.
+    </div>
+    <div style="margin-top:10px">
+      <button class="btn btn-sm btn-primary" onclick="activateAccount()" id="btnActivate">Activate Account</button>
+    </div>
+    <div id="activateResult" style="margin-top:8px; display:none; font-size:13px"></div>
+  </div>
+
+  <div id="accountActive" style="display:none; background:#0a2e0a; border:1px solid #4caf50; border-radius:6px; padding:8px; margin:10px 0">
+    <span style="color:#4caf50; font-weight:600">&#10003; Sovereign account active</span>
   </div>
 
   <!-- Roles -->
@@ -681,6 +700,15 @@ function updateStats(data) {
     setBadge('solaxyBadge', sol.service.active);
   }
   document.getElementById('solSlot').textContent = num(sol.sync.slot_number);
+  // Slot Diff in SVM Rollup box (local slot vs network)
+  const rpcNet = (data.rpc && data.rpc.network) || {};
+  const rpcLoc = (data.rpc && data.rpc.local) || {};
+  const solDiffEl = document.getElementById('solSlotDiff');
+  if (rpcLoc.slot != null && rpcNet.slot != null) {
+    const sd = rpcNet.slot - rpcLoc.slot;
+    solDiffEl.textContent = sd <= 0 ? '0' : '-' + num(sd);
+    solDiffEl.style.color = sd <= 3 ? '#3fb950' : sd <= 20 ? '#d29922' : '#f85149';
+  }
   if (sol.sync.block_time_ms != null) {
     document.getElementById('solBlockTime').textContent = sol.sync.block_time_ms + ' ms';
   } else if (sol.sync.slots_per_sec === 0) {
@@ -1246,6 +1274,37 @@ async function applyWalletOnly() {
   }
 }
 
+// Account Activation
+async function activateAccount() {
+  const btn = document.getElementById('btnActivate');
+  const result = document.getElementById('activateResult');
+  btn.disabled = true;
+  btn.textContent = 'Activating...';
+  result.style.display = 'block';
+  result.style.color = '#8b949e';
+  result.textContent = 'Sending 0-lamport self-transfer via mainnet sequencer...';
+  try {
+    const r = await fetch('/api/activate-account', {method: 'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      result.style.color = '#4caf50';
+      result.textContent = 'Account activated! Signature: ' + (d.signature || '').substring(0, 20) + '...';
+      // Refresh status after a short delay to let the TX propagate
+      setTimeout(() => { fetchRegistrationStatus(); }, 5000);
+    } else {
+      result.style.color = '#f44336';
+      result.textContent = 'Failed: ' + (d.error || 'Unknown error');
+      btn.disabled = false;
+      btn.textContent = 'Activate Account';
+    }
+  } catch (e) {
+    result.style.color = '#f44336';
+    result.textContent = 'Request failed: ' + e.message;
+    btn.disabled = false;
+    btn.textContent = 'Activate Account';
+  }
+}
+
 // On-Chain Registration Status
 async function fetchRegistrationStatus() {
   try {
@@ -1258,6 +1317,20 @@ async function fetchRegistrationStatus() {
     const prv = document.getElementById('regProverStatus');
     const seqBadge = document.getElementById('seqBadge');
     const proverBadge = document.getElementById('proverBadge');
+
+    // Account activation check
+    const activationBox = document.getElementById('accountActivation');
+    const activeBox = document.getElementById('accountActive');
+    if (d.has_sovereign_account) {
+      activationBox.style.display = 'none';
+      activeBox.style.display = 'block';
+    } else if (parseInt(d.gas_balance || '0', 10) > 0) {
+      activationBox.style.display = 'block';
+      activeBox.style.display = 'none';
+    } else {
+      activationBox.style.display = 'none';
+      activeBox.style.display = 'none';
+    }
 
     if (bal) {
       const raw = parseInt(d.gas_balance || '0', 10);
