@@ -769,9 +769,9 @@ fi
 # Step 11: Install Python dependencies
 # ---------------------------------------------------------------------------
 log "Installing Python dependencies..."
-pip3 install --break-system-packages --ignore-installed flask psycopg2-binary requests base58 pynacl 2>/dev/null || \
-    pip3 install --break-system-packages flask psycopg2-binary requests base58 pynacl 2>/dev/null || \
-    pip3 install flask psycopg2-binary requests base58 pynacl
+pip3 install --break-system-packages --ignore-installed flask psycopg2-binary requests base58 pynacl bech32 2>/dev/null || \
+    pip3 install --break-system-packages flask psycopg2-binary requests base58 pynacl bech32 2>/dev/null || \
+    pip3 install flask psycopg2-binary requests base58 pynacl bech32
 
 # ---------------------------------------------------------------------------
 # Step 12: Setup Dashboard
