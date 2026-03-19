@@ -84,14 +84,14 @@ The installer automatically configures all three files. For existing installs th
 
 ### Celestia Wallets
 
-The node uses **two** Celestia wallets:
+The node has two Celestia-related addresses (both shown in the dashboard under Node Identity):
 
 | Wallet | Purpose |
 |---|---|
-| **Bridge Node** (`celestia1...`) | Pays for Celestia transactions, shown in dashboard |
-| **DA Signer** (`celestia1...`) | Pays for DA blob submissions from the svm-rollup node |
+| **Bridge Node** (`celestia1...`) | Celestia bridge node identity for DA sampling |
+| **DA Signer** (`celestia1...`) | Used by svm-rollup for DA blob submissions |
 
-Both need TIA funding. The DA Signer address is derived from `[da].signer_private_key` in `config.toml` and is displayed in the dashboard under Node Identity.
+> **TIA is not required** for standard community node operation. Bond registration and deposits are submitted via the Solaxy mainnet REST API. TIA would only be needed if you run as the preferred sequencer (which submits batches to Celestia DA).
 
 ## After Installation
 
