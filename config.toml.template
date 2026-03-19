@@ -18,6 +18,10 @@ grpc_url = "%%GRPC_URL%%"
 # Private key used to sign Celestia transactions.
 signer_private_key = "%%SIGNER_PRIVATE_KEY%%"
 
+# Increase timeouts to avoid warnings when Celestia bridge is busy with DAS sampling
+request_timeout_secs = 60
+api_request_timeout_secs = 15
+
 [storage]
 # The path to the rollup's data directory.
 path = "data"
