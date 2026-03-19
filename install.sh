@@ -476,6 +476,7 @@ sudo systemctl start postgresql
 # PostgreSQL password — read from dashboard.conf or generate a new one
 # ---------------------------------------------------------------------------
 DASHBOARD_CONF="$USER_HOME/dashboard/dashboard.conf"
+PG_PASS=""
 if [[ -f "$DASHBOARD_CONF" ]]; then
     PG_PASS=$(grep -oP '^DB_PASSWORD=\K.*' "$DASHBOARD_CONF" 2>/dev/null || true)
 fi
