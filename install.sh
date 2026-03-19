@@ -472,9 +472,30 @@ log "Setting up PostgreSQL..."
 sudo systemctl enable postgresql
 sudo systemctl start postgresql
 
+# ---------------------------------------------------------------------------
+# PostgreSQL password — read from dashboard.conf or generate a new one
+# ---------------------------------------------------------------------------
+DASHBOARD_CONF="$USER_HOME/dashboard/dashboard.conf"
+if [[ -f "$DASHBOARD_CONF" ]]; then
+    PG_PASS=$(grep -oP '^DB_PASSWORD=\K.*' "$DASHBOARD_CONF" 2>/dev/null || true)
+fi
+if [[ -z "$PG_PASS" ]]; then
+    # Existing installs with "secret" — keep it for backward compat
+    if sudo -u postgres psql -c "SELECT 1" -h localhost -U postgres 2>/dev/null | grep -q 1; then
+        PG_PASS="secret"
+    else
+        PG_PASS=$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)
+        log "Generated random PostgreSQL password."
+    fi
+    mkdir -p "$(dirname "$DASHBOARD_CONF")"
+    echo "DB_PASSWORD=${PG_PASS}" > "$DASHBOARD_CONF"
+    chmod 600 "$DASHBOARD_CONF"
+    log "Saved DB password to $DASHBOARD_CONF"
+fi
+
 # Create database and user
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='postgres'" | grep -q 1 || true
-sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'secret';" 2>/dev/null || true
+sudo -u postgres psql -c "ALTER USER postgres PASSWORD '${PG_PASS}';" 2>/dev/null || true
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='svm'" | grep -q 1 || \
     sudo -u postgres createdb svm
 
@@ -722,7 +743,7 @@ else
                     rm -rf "$USER_HOME/svm-rollup/data"
                     mkdir -p "$USER_HOME/svm-rollup/data"
                     # Truncate PostgreSQL tables
-                    PGPASSWORD=secret psql -h localhost -U postgres -d svm \
+                    PGPASSWORD="${PG_PASS}" psql -h localhost -U postgres -d svm \
                         -c "TRUNCATE transactions, accounts_transactions, accounts, blocks CASCADE;" 2>/dev/null || true
                     log "Data wiped. Node will re-sync on next start."
                     ;;
@@ -788,7 +809,7 @@ Type=simple
 WorkingDirectory=${USER_HOME}/svm-rollup
 Environment=SOV_PROVER_MODE=skip
 Environment=RUST_LOG=info
-Environment=DATABASE_URL=postgresql://postgres:secret@localhost:5432/svm
+Environment=DATABASE_URL=postgresql://postgres:${PG_PASS}@localhost:5432/svm
 ExecStart=${USER_HOME}/svm-rollup/svm-rollup --da-layer celestia --rollup-config-path config.toml --genesis-config-dir genesis
 Restart=on-failure
 RestartSec=15

@@ -29,6 +29,23 @@ app = Flask(__name__)
 
 EASYNODE_VERSION = "1.0.0"
 
+
+def _read_db_password():
+    """Read PostgreSQL password from dashboard.conf, fallback to 'secret' for old installs."""
+    conf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.conf")
+    if os.path.isfile(conf):
+        try:
+            with open(conf) as f:
+                for line in f:
+                    if line.startswith("DB_PASSWORD="):
+                        return line.split("=", 1)[1].strip()
+        except Exception:
+            pass
+    return "secret"
+
+
+DB_PASSWORD = _read_db_password()
+
 # Cache for expensive CLI calls
 _cache = {}
 _cache_lock = threading.Lock()
@@ -1256,7 +1273,7 @@ def celestia_p2p():
 def db_stats():
     """Get PostgreSQL stats."""
     try:
-        conn = psycopg2.connect(dbname="svm", user="postgres", password="secret", host="localhost")
+        conn = psycopg2.connect(dbname="svm", user="postgres", password=DB_PASSWORD, host="localhost")
         cur = conn.cursor()
         stats = {}
         for table in ("blocks", "transactions", "accounts"):
@@ -1942,7 +1959,7 @@ def api_wallet_apply():
         try:
             conn = psycopg2.connect(
                 host="localhost", database="svm",
-                user="postgres", password="secret"
+                user="postgres", password=DB_PASSWORD
             )
             conn.autocommit = True
             cur = conn.cursor()
