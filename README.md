@@ -156,7 +156,7 @@ Or use the **Settings** panel in the dashboard to start/stop/restart services.
 
 ## Network Map
 
-The dashboard sends periodic heartbeats to the [Public Validator Map](https://map.orbitnode.dev):
+The dashboard sends periodic heartbeats to the [Public Validator Map](https://network-map.orbitnode.dev/):
 
 ```json
 {
