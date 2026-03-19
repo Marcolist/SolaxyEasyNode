@@ -23,6 +23,21 @@ One-line installer for a complete Solaxy node: **SVM Rollup + Celestia Bridge No
                   \_/
 ```
 
+## Why this exists
+
+Running a Solaxy node currently requires multiple manual steps — Celestia build, rollup config, service wiring, monitoring setup. SolaxyEasyNode reduces setup to a single command and provides a production-ready dashboard with bond management, Telegram alerts, and network map integration.
+
+## Screenshots
+
+### Node Dashboard
+![Dashboard](screenshots/dashboard.png)
+
+### Telegram Bot
+![Telegram Bot](screenshots/telegrambot.png)
+
+### Network Map
+![Network Map](screenshots/map.png)
+
 ## Quick Install
 
 ```bash
