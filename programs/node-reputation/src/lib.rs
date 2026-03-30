@@ -6,19 +6,18 @@ pub mod reputation;
 pub mod state;
 
 use instructions::*;
+use state::NodeRole;
 
-declare_id!("RepNodE1111111111111111111111111111111111111");
+declare_id!("ChD5eVepwaTMEabHWxyfDNCjbyVGx5bphCjoCuXsZw65");
 
 #[program]
 pub mod node_reputation {
     use super::*;
 
-    /// Initialize the global network stats singleton. Called once after deploy.
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        instructions::initialize::handler(ctx)
+        instructions::initialize::process(ctx)
     }
 
-    /// Register a new node in the on-chain registry.
     pub fn register_node(
         ctx: Context<RegisterNode>,
         solaxy_wallet: Pubkey,
@@ -26,10 +25,9 @@ pub mod node_reputation {
         role: NodeRole,
         metadata_uri: String,
     ) -> Result<()> {
-        instructions::register_node::handler(ctx, solaxy_wallet, celestia_address, role, metadata_uri)
+        instructions::register_node::process(ctx, solaxy_wallet, celestia_address, role, metadata_uri)
     }
 
-    /// Submit a periodic heartbeat with current node metrics.
     pub fn submit_heartbeat(
         ctx: Context<SubmitHeartbeat>,
         solaxy_block_height: u64,
@@ -40,7 +38,7 @@ pub mod node_reputation {
         peer_count: u16,
         attested_height: u64,
     ) -> Result<()> {
-        instructions::submit_heartbeat::handler(
+        instructions::submit_heartbeat::process(
             ctx,
             solaxy_block_height,
             celestia_das_height,
@@ -52,18 +50,15 @@ pub mod node_reputation {
         )
     }
 
-    /// Finalize a daily epoch summary for a node. Permissionless crank.
     pub fn close_epoch(ctx: Context<CloseEpoch>, epoch_day: u32) -> Result<()> {
-        instructions::close_epoch::handler(ctx, epoch_day)
+        instructions::close_epoch::process(ctx, epoch_day)
     }
 
-    /// Update node metadata URI.
     pub fn update_metadata(ctx: Context<UpdateMetadata>, metadata_uri: String) -> Result<()> {
-        instructions::update_metadata::handler(ctx, metadata_uri)
+        instructions::update_metadata::process(ctx, metadata_uri)
     }
 
-    /// Deactivate a node (operator only).
     pub fn deactivate_node(ctx: Context<DeactivateNode>) -> Result<()> {
-        instructions::deactivate_node::handler(ctx)
+        instructions::deactivate_node::process(ctx)
     }
 }

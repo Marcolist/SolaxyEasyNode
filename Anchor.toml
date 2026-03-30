@@ -5,10 +5,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-node_reputation = "RepNodE1111111111111111111111111111111111111"
+node_reputation = "ChD5eVepwaTMEabHWxyfDNCjbyVGx5bphCjoCuXsZw65"
 
 [programs.devnet]
-node_reputation = "RepNodE1111111111111111111111111111111111111"
+node_reputation = "ChD5eVepwaTMEabHWxyfDNCjbyVGx5bphCjoCuXsZw65"
 
 [registry]
 url = "https://api.apr.dev"

@@ -22,7 +22,7 @@ pub struct DeactivateNode<'info> {
     pub network_stats: Account<'info, NetworkStats>,
 }
 
-pub fn handler(ctx: Context<DeactivateNode>) -> Result<()> {
+pub fn process(ctx: Context<DeactivateNode>) -> Result<()> {
     let node = &mut ctx.accounts.node;
     require!(node.is_active, ReputationError::NodeNotActive);
 

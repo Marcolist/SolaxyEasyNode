@@ -33,7 +33,7 @@ pub struct CloseEpoch<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<CloseEpoch>, epoch_day: u32) -> Result<()> {
+pub fn process(ctx: Context<CloseEpoch>, epoch_day: u32) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let current_day = (now / 86400) as u32;
     require!(epoch_day <= current_day, ReputationError::EpochInFuture);

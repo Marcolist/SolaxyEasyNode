@@ -19,7 +19,7 @@ pub struct Initialize<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(ctx: Context<Initialize>) -> Result<()> {
+pub fn process(ctx: Context<Initialize>) -> Result<()> {
     let stats = &mut ctx.accounts.network_stats;
     stats.authority = ctx.accounts.authority.key();
     stats.total_nodes = 0;

@@ -15,7 +15,7 @@ pub struct UpdateMetadata<'info> {
     pub node: Account<'info, NodeRegistry>,
 }
 
-pub fn handler(ctx: Context<UpdateMetadata>, metadata_uri: String) -> Result<()> {
+pub fn process(ctx: Context<UpdateMetadata>, metadata_uri: String) -> Result<()> {
     require!(
         metadata_uri.len() <= MAX_METADATA_URI_LEN,
         ReputationError::MetadataUriTooLong

@@ -36,7 +36,7 @@ pub struct RegisterNode<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(
+pub fn process(
     ctx: Context<RegisterNode>,
     solaxy_wallet: Pubkey,
     celestia_address: [u8; 32],

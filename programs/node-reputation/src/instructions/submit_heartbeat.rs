@@ -35,7 +35,7 @@ pub struct SubmitHeartbeat<'info> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn handler(
+pub fn process(
     ctx: Context<SubmitHeartbeat>,
     solaxy_block_height: u64,
     celestia_das_height: u64,
