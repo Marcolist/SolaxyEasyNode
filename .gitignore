@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 dashboard/dashboard.conf
+
+# Rust / Anchor build artifacts
+target/
+Cargo.lock
