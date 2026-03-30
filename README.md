@@ -1,4 +1,4 @@
-# SolaxyEasyNode v1.0.0
+# SolaxyEasyNode v1.1.0
 
 One-line installer for a complete Solaxy node: **SVM Rollup + Celestia Bridge Node + PostgreSQL + Web Dashboard**.
 
@@ -148,7 +148,7 @@ The dashboard sends periodic heartbeats to the [Public Validator Map](https://ne
   "configured_wallet": "...",
   "bond_status": "bonded | unbonded | not_configured",
   "roles": ["sequencer", "prover"],
-  "version": "1.0.0"
+  "version": "1.1.0"
 }
 ```
 

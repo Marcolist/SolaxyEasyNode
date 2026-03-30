@@ -1,0 +1,19 @@
+[Unit]
+Description=SolaxyEasyNode Reputation Relayer
+After=network-online.target solaxy-dashboard.service
+Wants=network-online.target
+Requires=solaxy-dashboard.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/SolaxyEasyNode/relayer
+ExecStart=/usr/bin/python3 /root/SolaxyEasyNode/relayer/reputation_relayer.py
+Restart=always
+RestartSec=30
+Environment=SOLAXY_RPC_URL=https://mainnet.rpc.solaxy.io
+Environment=NODE_WALLET_PATH=/root/svm-rollup/node-wallet.json
+Environment=HEARTBEAT_INTERVAL=600
+
+[Install]
+WantedBy=multi-user.target
